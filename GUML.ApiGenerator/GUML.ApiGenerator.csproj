@@ -1,0 +1,40 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+      <OutputType>Exe</OutputType>
+      <TargetFramework>net10.0</TargetFramework>
+      <ImplicitUsings>enable</ImplicitUsings>
+      <Nullable>enable</Nullable>
+      <PackAsTool>true</PackAsTool>
+      <ToolCommandName>guml-apigen</ToolCommandName>
+      <PackageId>GUML.ApiGenerator</PackageId>
+      <Version>0.1.0</Version>
+      <Authors>shitake233</Authors>
+      <Company>GUML</Company>
+      <Description>CLI tool that downloads a Godot C# NuGet package and emits GUML API metadata.</Description>
+      <PackageTags>guml;godot;cli;tool</PackageTags>
+      <PackageReadmeFile>README.md</PackageReadmeFile>
+      <PackageLicenseFile>LICENSE</PackageLicenseFile>
+      <PackageProjectUrl>https://github.com/shitake233/GUML</PackageProjectUrl>
+      <RepositoryUrl>https://github.com/shitake233/GUML</RepositoryUrl>
+      <RepositoryType>git</RepositoryType>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="ConsoleAppFramework" Version="5.7.13">
+        <PrivateAssets>all</PrivateAssets>
+        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      </PackageReference>
+      <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.0.0" />
+      <PackageReference Include="Mono.Cecil" Version="0.11.6" />
+      <PackageReference Include="NuGet.Configuration" Version="7.3.0" />
+      <PackageReference Include="NuGet.Protocol" Version="7.3.0" />
+      <PackageReference Include="NuGet.Resolver" Version="7.3.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Include="README.md" Pack="true" PackagePath="\" />
+      <None Include="LICENSE" Pack="true" PackagePath="\" />
+    </ItemGroup>
+
+</Project>
