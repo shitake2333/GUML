@@ -1,10 +1,73 @@
+﻿using RegexTokenizeGenerator;
+
 namespace GUML;
 
-public class GumlParserException(string msg, IPosInfo posInfo) : Exception($"{msg}(at {posInfo.Line}:{posInfo.Column})");
+public class GumlParserException : Exception
+{
+    public int Line { get; }
+    public int Column { get; }
+    public string CodeString { get; } = "";
+    public int StartIndex { get; }
+    public int Length { get; } = 1;
+
+    public GumlParserException(string message, IPosInfo posInfo, string codeString = "")
+        : base($"{message} at {posInfo.Line}:{posInfo.Column}.")
+    {
+        Line = posInfo.Line;
+        Column = posInfo.Column;
+        StartIndex = posInfo.Start;
+        if (posInfo is Token token)
+        {
+            Length = Math.Max(1, token.End - token.Start);
+        }
+        else
+        {
+            Length = Math.Max(1, posInfo.End - posInfo.Start);
+        }
+        CodeString = codeString;
+    }
+
+    public string PrintDiagnostic()
+    {
+        if (string.IsNullOrEmpty(CodeString)) return Message;
+
+        var lines = CodeString.Split(['\n'], StringSplitOptions.None);
+        if (Line < 1 || Line > lines.Length) return Message;
+
+        var lineContent = lines[Line - 1].TrimEnd();
+
+        var pointerLine = new System.Text.StringBuilder();
+        for (int i = 1; i < Column; i++)
+        {
+            if (i - 1 < lineContent.Length && lineContent[i - 1] == '\t')
+                pointerLine.Append('\t');
+            else
+                pointerLine.Append(' ');
+        }
+
+        int markerLength = Math.Max(1, Length);
+        for (int i = 0; i < markerLength; i++)
+        {
+            pointerLine.Append('^');
+        }
+
+        var sb = new System.Text.StringBuilder();
+        var lineStr = Line.ToString();
+        var padding = new string(' ', lineStr.Length);
+
+        sb.AppendLine($"error: {Message}");
+        sb.AppendLine($"  --> line:{Line}:{Column}");
+        sb.AppendLine($" {padding} |");
+        sb.AppendLine($" {lineStr} | {lineContent}");
+        sb.AppendLine($" {padding} | {pointerLine} {Message}");
+
+        return sb.ToString();
+    }
+}
 
 public class GumlParser
 {
-    private static readonly string[] SKeywords = ["each", "import", "import_top", "redirect", "resource", "vec2", "color", 
+    private static readonly string[] SKeywords = ["each", "import", "import_top", "redirect", "resource", "vec2", "color",
         "style_box_empty", "style_box_flat", "style_box_line", "style_box_texture"];
 
     private static readonly string[] SOperators = ["!=", "<=", ">=", "==", "!", "||", "&&", "+", "-", "*", "/", "%", "^"];
@@ -29,7 +92,7 @@ public class GumlParser
     private GumlDoc _gumlDoc;
     private List<Token> _tokens = null!;
     private Stack<GumlSyntaxNode> _nodeStack = null!;
-    
+
     public GumlParser()
     {
         Converters = new List<IConverter>();
@@ -76,11 +139,11 @@ public class GumlParser
         switch (text.Length)
         {
             case > 1 when char.IsUpper(text[0]):
-            {
-                if (tokenize.Index - text.Length <= 0) return "component";
-                var lastCh = tokenize.CodeString[tokenize.Index - text.Length - 1];
-                return lastCh == '.' ? "name" : "component";
-            }
+                {
+                    if (tokenize.Index - text.Length <= 0) return "component";
+                    var lastCh = tokenize.CodeString[tokenize.Index - text.Length - 1];
+                    return lastCh == '.' ? "name" : "component";
+                }
             case > 1 when text[0] == '$':
                 return "global_ref";
             case > 1 when text[0] == '@':
@@ -119,28 +182,49 @@ public class GumlParser
     {
         Code = code;
         _index = 0;
-        _tokenIdCache = 0;
+        _tokenIdCache = -1; // Invalid initially
         _tokenCache = null;
         _nodeStack = new Stack<GumlSyntaxNode>();
-        _tokens = _tokenizer.Tokenize(Code);
+        try
+        {
+            _tokens = _tokenizer.Tokenize(Code);
+        }
+        catch (TokenizeException te)
+        {
+            // Wrap or rethrow? The user might expect GumlParserException or handle TokenizeException.
+            // But TokenizeException is from another assembly.
+            // Let's rethrow for now as it has good info.
+            throw;
+        }
+
         _gumlDoc = new GumlDoc();
         ParseImport();
         ParseRedirect();
-        if (CurrentToken().Name == "eof") throw new GumlParserException("Must has root component.", CurrentToken());
+        if (CurrentToken().Name == "eof") throw new GumlParserException("Must has root component.", CurrentToken(), Code);
         ParseComponent();
         return _gumlDoc;
     }
 
     private Token CurrentToken(string? name = null)
     {
-        if (name != null && _tokenCache?.Name != name)
+        // Ensure cache is valid for current index
+        if (_tokenCache is null || _tokenIdCache != _index)
         {
-            var errorMsg = $"Unexpected symbol type, expected '{name}' but currently is '{_tokenCache?.Name}'.";
-            throw new GumlParserException(errorMsg, _tokenCache!);
+            if (_index >= _tokens.Count)
+            {
+                // This shouldn't happen if tokenizer puts EOF, but safety first
+                throw new InvalidOperationException("Unexpected end of token stream");
+            }
+
+            _tokenCache = (Token)ApplyConverters(_tokens[_index], ConverterType.Token);
+            _tokenIdCache = _index;
         }
-        if (_tokenCache is not null && _tokenIdCache == _index) return _tokenCache.Value;
-        _tokenCache = (Token)ApplyConverters(_tokens[_index], ConverterType.Token);
-        _tokenIdCache = _index;
+
+        if (name != null && _tokenCache.Value.Name != name)
+        {
+            var errorMsg = $"Unexpected symbol type, expected '{name}' but currently is '{_tokenCache.Value.Name}' ('{_tokenCache.Value.Value}').";
+            throw new GumlParserException(errorMsg, _tokenCache.Value, Code);
+        }
         return _tokenCache.Value;
     }
 
@@ -154,8 +238,8 @@ public class GumlParser
 
     }
 
-    private static GumlParserException UnexpectedException(Token token) => 
-        new ($"Unexpected symbol '{token.Value}'.", token);
+    private static GumlParserException UnexpectedException(Token token) =>
+        new($"Unexpected symbol '{token.Value}'.", token);
 
     private void ThrowEofException()
     {
@@ -165,7 +249,7 @@ public class GumlParser
     private void ParseImport()
     {
         if (CurrentToken().Name != "import" && CurrentToken().Name != "import_top") return;
-        while (CurrentToken().Name == "import" ||  CurrentToken().Name == "import_top")
+        while (CurrentToken().Name == "import" || CurrentToken().Name == "import_top")
         {
             var isTop = CurrentToken().Name == "import_top";
             ThrowEofException();
@@ -187,7 +271,7 @@ public class GumlParser
         _gumlDoc.Redirect = redirect;
         NextToken();
     }
-    
+
     private void ParseComponent(GumlSyntaxNode? parent = null)
     {
         var aliasName = "";
@@ -374,7 +458,7 @@ public class GumlParser
                     lastIsValue = false;
                     break;
                 case "(":
-                    if (lastIsValue) throw new GumlParserException("", CurrentToken());
+                    if (lastIsValue) throw new GumlParserException("Unexpected token '(', maybe you missed an operator?", CurrentToken(), Code);
                     opNodeStack.Push(null);
                     break;
                 case ")":
@@ -396,7 +480,10 @@ public class GumlParser
                 default:
                     var valueNode = new GumlValueNode
                     {
-                        Start = current.Start, End = current.End, Line = current.Line, Column = current.Column
+                        Start = current.Start,
+                        End = current.End,
+                        Line = current.Line,
+                        Column = current.Column
                     };
                     valueNode = GetRmlValueNode(current, valueNode);
                     if (opNodeStack.Peek() == null) opNodeStack.Push(valueNode);
@@ -407,7 +494,7 @@ public class GumlParser
             NextToken();
             if (CurrentToken().Name == "}") break;
         }
-        LoopEnd:
+    LoopEnd:
         var value = GetRoot(opNodeStack.Pop()!);
         value.End = CurrentToken().Start - 1;
         return value;
@@ -427,7 +514,7 @@ public class GumlParser
     private GumlOpNode ParseOperator(bool isPrefix)
     {
         GumlOpNode opNode;
-        if (!isPrefix && InfixOpNode.OpPrecedence.ContainsKey(CurrentToken().Value) )
+        if (!isPrefix && InfixOpNode.OpPrecedence.ContainsKey(CurrentToken().Value))
         {
             opNode = new InfixOpNode
             {
@@ -527,7 +614,7 @@ public class GumlParser
         CurrentToken(")");
         return valueNode;
     }
-    
+
     private GumlValueNode ParseColor(GumlValueNode valueNode)
     {
         NextToken("(");
@@ -544,7 +631,7 @@ public class GumlParser
         CurrentToken(")");
         return valueNode;
     }
-    
+
     private GumlValueNode ParseStyleBox(StyleNodeType styleNodeType, GumlValueNode valueNode)
     {
         valueNode.StyleNodeType = styleNodeType;
@@ -617,7 +704,7 @@ public class GumlParser
         }
         return valueNode;
     }
-    
+
     private GumlOpNode ComputePriority(GumlOpNode oldOp, GumlOpNode newOp)
     {
         var currentOp = oldOp;
@@ -645,10 +732,10 @@ public class GumlParser
     private object ApplyConverters(object node, ConverterType converterType)
     {
         var result = node;
-        Converters.Where(converter => converter.ConverterType == converterType).ToList().ForEach(converter =>
+        foreach (var converter in Converters.Where(c => c.ConverterType == converterType))
         {
             result = converter.Convert(result);
-        });
+        }
         return result;
     }
 }

@@ -1,12 +1,6 @@
-namespace GUML;
+﻿using RegexTokenizeGenerator;
 
-public interface IPosInfo
-{
-    public int Start { get; set; }
-    public int End { get; set; }
-    public int Line { get; set; }
-    public int Column { get; set; }
-}
+namespace GUML;
 
 public class GumlSyntaxNode : IPosInfo
 {

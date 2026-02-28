@@ -1,3 +1,5 @@
+﻿using RegexTokenizeGenerator;
+
 namespace GUML;
 
 public abstract class GumlExprNode : IPosInfo

@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <PackageId>RegexTokenizeGenerator</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>shitake233</Authors>
+    <Company>None</Company>
+    <Description>A high-performance regex-based tokenizer (lexer) generator for .NET, featuring Trie-optimized keyword matching and detailed Rust-style error diagnostics.</Description>
+    <PackageProjectUrl>https://github.com/molingyu/GUML</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/molingyu/GUML</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>regex tokenizer lexer parsing source-generator diagnostic csharp dotnet</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="LICENSE" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
