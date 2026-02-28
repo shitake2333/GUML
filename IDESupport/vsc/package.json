@@ -1,0 +1,34 @@
+{
+  "name": "guml",
+  "displayName": "GUML",
+  "description": "GUML support",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "guml",
+        "aliases": [
+          "GUML",
+          "guml"
+        ],
+        "extensions": [
+          ".guml"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "guml",
+        "scopeName": "source.guml",
+        "path": "./syntaxes/guml.tmlanguage.json"
+      }
+    ]
+  }
+}

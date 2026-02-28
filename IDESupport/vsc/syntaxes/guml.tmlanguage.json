@@ -1,0 +1,177 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "GUML",
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#keywords"
+        },
+        {
+            "include": "#block-parameters"
+        },
+        {
+            "include": "#constants"
+        },
+        {
+            "include": "#support"
+        },
+        {
+            "include": "#component-definitions"
+        },
+        {
+            "include": "#properties"
+        },
+        {
+            "include": "#vars"
+        },
+        {
+            "include": "#operators"
+        }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "begin": "//",
+                    "end": "$",
+                    "name": "comment.line.double-slash.guml"
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "begin": "\"",
+                    "end": "\"",
+                    "name": "string.quoted.double.guml",
+                    "patterns": [
+                        {
+                            "match": "\\\\.",
+                            "name": "constant.character.escape.guml"
+                        }
+                    ]
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "match": "\\b(import|import_top|redirect|each)\\b",
+                    "name": "keyword.control.guml"
+                }
+            ]
+        },
+        "block-parameters": {
+            "patterns": [
+                {
+                    "begin": "\\|(?=\\s*(?:[a-zA-Z_][a-zA-Z0-9_]*|\\s*)\\||\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*,)",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.definition.parameters.begin.guml"
+                        }
+                    },
+                    "end": "\\|",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.definition.parameters.end.guml"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b",
+                            "name": "variable.parameter.guml"
+                        },
+                        {
+                            "match": ",",
+                            "name": "punctuation.separator.parameter.guml"
+                        }
+                    ]
+                }
+            ]
+        },
+        "constants": {
+            "patterns": [
+                {
+                    "match": "\\b(true|false|null)\\b",
+                    "name": "constant.language.guml"
+                },
+                {
+                    "match": "\\b[0-9]+(\\.[0-9]+)?\\b",
+                    "name": "constant.numeric.guml"
+                }
+            ]
+        },
+        "support": {
+            "patterns": [
+                {
+                    "match": "\\b(vec2|color|resource|style_box_empty|style_box_flat|style_box_line|style_box_texture)\\b",
+                    "name": "support.function.guml"
+                }
+            ]
+        },
+        "component-definitions": {
+            "patterns": [
+                {
+                    "match": "\\b[A-Z][a-zA-Z0-9_]*\\b",
+                    "name": "entity.name.type.class.guml"
+                }
+            ]
+        },
+        "properties": {
+            "patterns": [
+                {
+                    "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(:[=]?)",
+                    "captures": {
+                        "1": {
+                            "name": "variable.other.property.guml"
+                        },
+                        "2": {
+                            "name": "keyword.operator.assignment.guml"
+                        }
+                    }
+                },
+                {
+                    "match": "(#[a-zA-Z0-9_]+)\\s*(:[=]?)",
+                    "captures": {
+                        "1": {
+                            "name": "entity.name.function.guml"
+                        },
+                        "2": {
+                            "name": "keyword.operator.assignment.guml"
+                        }
+                    }
+                }
+            ]
+        },
+        "vars": {
+            "patterns": [
+                {
+                    "match": "@[a-zA-Z0-9_]+",
+                    "name": "variable.language.alias.guml"
+                },
+                {
+                    "match": "\\$[a-zA-Z0-9_]+",
+                    "name": "variable.language.global.guml"
+                },
+                {
+                    "match": "\\b[a-z_][a-zA-Z0-9_]*\\b",
+                    "name": "variable.other.guml"
+                }
+            ]
+        },
+        "operators": {
+            "patterns": [
+                {
+                    "match": "(!=|<=|>=|==|!|\\|\\||&&|\\+|\\-|\\*|/|%|\\^)",
+                    "name": "keyword.operator.guml"
+                }
+            ]
+        }
+    },
+    "scopeName": "source.guml"
+}

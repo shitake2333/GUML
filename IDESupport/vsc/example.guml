@@ -1,0 +1,21 @@
+import "setting"
+
+Panel {
+    Label {
+        position: vec2(10, 10),
+        size: vec2(200, 30),
+        text:= "hello " + $controller.SayHello
+    }
+    
+    each $controller.Names { |index, name|
+        Control {
+            size: vec2(220, 100),
+            custom_minimum_size: vec2(220, 100),
+            Label {
+                position: vec2(10, 10),
+                size: vec2(200, 30),
+                text: name
+            }
+        }
+    }         
+}
