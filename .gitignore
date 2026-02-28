@@ -27,3 +27,6 @@ bin/
 obj/
 
 nupkg/
+
+*_plan.md
+.github/*-instructions.md
