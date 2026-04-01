@@ -48,28 +48,35 @@ public class GumlStaticTests
 
     // ── ControllerRegistry concurrency ──
 
+    // Use unique sentinel types as keys to avoid cross-test interference
+    // through the static ConcurrentDictionary, even if TestInitialize is skipped.
+    private sealed class RegistryKey_TryAdd;
+    private sealed class RegistryKey_Duplicate;
+
     [TestMethod]
     public void ControllerRegistry_TryAdd_Succeeds()
     {
         GuiController Factory(Node _) => null!;
 
-        bool added = Guml.ControllerRegistry.TryAdd(typeof(GumlStaticTests), Factory);
+        bool added = Guml.ControllerRegistry.TryAdd(typeof(RegistryKey_TryAdd), Factory);
 
         Assert.IsTrue(added);
-        Assert.IsTrue(Guml.ControllerRegistry.ContainsKey(typeof(GumlStaticTests)));
+        Assert.IsTrue(Guml.ControllerRegistry.ContainsKey(typeof(RegistryKey_TryAdd)));
     }
 
     [TestMethod]
     public void ControllerRegistry_DuplicateKey_DoesNotOverwrite()
     {
-        GuiController Factory1(Node _) => null!;
-        GuiController Factory2(Node _) => null!;
+        Func<Node, GuiController> factory1 = _ => null!;
+        Func<Node, GuiController> factory2 = _ => null!;
 
-        Guml.ControllerRegistry.TryAdd(typeof(GumlStaticTests), Factory1);
-        bool secondAdd = Guml.ControllerRegistry.TryAdd(typeof(GumlStaticTests), Factory2);
+        bool firstAdd = Guml.ControllerRegistry.TryAdd(typeof(RegistryKey_Duplicate), factory1);
+        Assert.IsTrue(firstAdd, "First TryAdd should succeed on a clean registry.");
+
+        bool secondAdd = Guml.ControllerRegistry.TryAdd(typeof(RegistryKey_Duplicate), factory2);
 
         Assert.IsFalse(secondAdd);
-        Assert.AreSame(Factory1, Guml.ControllerRegistry[typeof(GumlStaticTests)]);
+        Assert.AreSame(factory1, Guml.ControllerRegistry[typeof(RegistryKey_Duplicate)]);
     }
 
     // ── Load<T> registry miss ──
