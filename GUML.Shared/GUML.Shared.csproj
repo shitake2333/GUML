@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <PackageId>GUML.Shared</PackageId>
+    <Version>0.2.0</Version>
+    <Authors>shitake233</Authors>
+    <Description>Shared infrastructure for GUML: full-fidelity CST parser, API metadata models, and diagnostics. Used by GUML.SourceGenerator, GUML.LSP, and GUML.ApiGenerator.</Description>
+    <PackageProjectUrl>https://github.com/molingyu/GUML</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/molingyu/GUML</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>Godot GUML Shared</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="GUML.Shared.Tests" />
+  </ItemGroup>
+
+</Project>

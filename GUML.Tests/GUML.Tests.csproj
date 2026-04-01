@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+    <PackageReference Include="MSTest" Version="4.0.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.1.0" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GUML\GUML.csproj" />
+    <ProjectReference Include="..\RegexTokenizeGenerator\RegexTokenizeGenerator.csproj" />
+  </ItemGroup>
+
+</Project>

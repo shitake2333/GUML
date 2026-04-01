@@ -1,0 +1,20 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <!--
+    Auto-register .guml files as AdditionalFiles so the Roslyn source generator
+    can discover them via AdditionalTextsProvider. This picks up any .guml file
+    already declared as Content, None, or simply present in the project tree.
+  -->
+  <ItemGroup>
+    <AdditionalFiles Include="**/*.guml" Exclude="$(BaseIntermediateOutputPath)**;$(BaseOutputPath)**" />
+  </ItemGroup>
+
+  <!-- Expose the project directory to the source generator so it can compute relative .guml paths -->
+  <ItemGroup>
+    <CompilerVisibleProperty Include="GumlProjectDir" />
+  </ItemGroup>
+  <PropertyGroup>
+    <GumlProjectDir>$(MSBuildProjectDirectory)</GumlProjectDir>
+  </PropertyGroup>
+
+</Project>

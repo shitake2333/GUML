@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+
+    <PackageId>GUML.SourceGenerator</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>shitake233</Authors>
+    <Description>Roslyn incremental source generator that compiles .guml files into strongly-typed C# view classes at build time.</Description>
+    <PackageProjectUrl>https://github.com/molingyu/GUML</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/molingyu/GUML</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>Godot GUML SourceGenerator Roslyn</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+
+    <!-- Source generator packaging -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <IsRoslynComponent>true</IsRoslynComponent>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.3.1" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" PrivateAssets="all">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- Pack the generator DLL into the analyzers folder for NuGet -->
+  <ItemGroup>
+    <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="$(PkgGUML_Shared)\lib\netstandard2.0\GUML.Shared.dll"
+          Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false"
+          Condition="Exists('$(PkgGUML_Shared)\lib\netstandard2.0\GUML.Shared.dll')" />
+  </ItemGroup>
+
+  <!-- Pack the .targets file so it is auto-imported by consuming projects (NuGet) -->
+  <ItemGroup>
+    <None Include="build\**" Pack="true" PackagePath="build" />
+  </ItemGroup>
+
+  <!-- Reference GUML.Shared for DTO types (GumlApiCache etc.) -->
+  <ItemGroup>
+    <ProjectReference Include="..\GUML.Shared\GUML.Shared.csproj"
+                      GeneratePathProperty="true"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+
+
+</Project>
