@@ -2,14 +2,14 @@
 
 [![NuGet](https://img.shields.io/nuget/v/GUML)](https://www.nuget.org/packages/GUML) [![GitHub Release](https://img.shields.io/github/v/release/shitake2333/GUML)](https://github.com/shitake2333/GUML/releases/latest) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/shitake2333/GUML/blob/master/LICENSE)
 
-GUML is a declarative UI markup language (`.guml`) for **Godot .NET**, providing a QML/XAML-like development experience. It allows developers to define UI components and layouts using a concise syntax, with support for data binding, event handling, and reusable components. GUML offers two modes: **Source Generator** (compile-time, Roslyn-based) and **Interpreter** (runtime), providing flexible development options.
+GUML is a declarative UI markup language (`.guml`) for **Godot .NET**, providing a QML/XAML-like development experience. It allows developers to define UI components and layouts using a concise syntax, with support for data binding, event handling, and reusable components. GUML uses **Roslyn Source Generator** for compile-time code generation, delivering maximum performance with zero runtime overhead.
 
 ## Features
 
 - QML-like declarative syntax
 - Data binding — automatically update UI when controller properties change (one-way `:=`, two-way `<=>`, reverse `=:`)
 - Event wiring — connect Godot signals and C# events with one line
-- List rendering — `each` blocks with incremental updates via `NotifyList<T>`
+- List rendering — `each` blocks with incremental updates via `ObservableCollection<T>`
 - Reusable components — compose and reuse `.guml` files with typed parameters
 - Full Godot UI component support (all built-in Control types)
 - Theme overrides — set theme styles directly in GUML
@@ -55,7 +55,7 @@ Editor plugins have been moved to their own repositories:
 
 | Directory | Description |
 |-----------|-------------|
-| `GUML` | Core runtime library — `GuiController`, interpreter, converters, bindings |
+| `GUML` | Core runtime library — `GuiController`, converters, bindings |
 | `GUML.Shared` | Shared infrastructure — full-fidelity CST parser, API metadata models, diagnostics |
 | `GUML.SourceGenerator` | Roslyn source generator for compile-time `.guml` → C# code generation |
 | `GUML.Analyzer` | Language analyzer CLI tool — Roslyn-based project analysis and LSP features via JSON-RPC |
