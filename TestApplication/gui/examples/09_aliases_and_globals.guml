@@ -1,0 +1,66 @@
+// ============================================================
+// 09 - Aliases & Globals (§9.2, §9.3)
+// Demo: @ alias, $controller, $root
+// ============================================================
+VBoxContainer {
+    size_flags_horizontal: .Fill
+
+    // --- §9.2 Aliases (@) ---
+    // Alias becomes a strongly-typed property on the controller at code-gen time
+    // @snake_case -> PascalCase property (e.g. @greeting_label -> GreetingLabel)
+    @greeting_label: Label {
+        text := $"Hello, {$controller.display_name}!",
+        horizontal_alignment: .Center,
+        label_settings: new LabelSettings { font_size: 20 }
+    }
+
+    // LineEdit writes back to user_name via reverse binding
+    @name_input: LineEdit {
+        placeholder_text: "Enter your name...",
+        size_flags_horizontal: .Fill,
+        text =: $controller.user_name
+    }
+
+    @submit_btn: Button {
+        text: "Update Greeting",
+        size_flags_horizontal: .Fill,
+        disabled := $controller.is_busy,
+        #pressed: $controller.on_submit
+    }
+
+    // Status bar
+    HBoxContainer {
+        Label {
+            text := $controller.status_message,
+            size_flags_horizontal: .Fill,
+            modulate := $controller.is_busy
+                        ? color(1.0, 0.8, 0.2, 1.0)
+                        : color(0.4, 1.0, 0.5, 1.0)
+        }
+        Label {
+            text: "Processing...",
+            visible := $controller.is_busy,
+            modulate: color(1.0, 0.8, 0.2, 1.0)
+        }
+    }
+
+    // --- §9.3 Pre-defined global references ---
+    // $controller — refers to the bound C# controller instance
+    Label {
+        text: "―― $controller chain access ――",
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+    Label {
+        text := $controller.user_name
+    }
+    Label {
+        text := $controller.data.profile.display_name
+    }
+
+    // Submit count badge
+    Label {
+        text := $"Submit count: {$controller.submit_count}",
+        modulate: color(0.7, 0.7, 0.7, 1.0)
+    }
+}
+

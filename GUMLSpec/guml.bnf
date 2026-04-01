@@ -1,0 +1,341 @@
+; GUML Strict Pure BNF
+; Source: GUMLSpec §§3-8 (consolidated)
+; Form: strict BNF only (no *, +, ?, or EBNF grouping operators)
+; Usage: feed to parser generator with a separate lexer that emits tokens listed below.
+
+; =========================
+; Parser entry
+; =========================
+
+<guml_document> ::= <import_directive_list> <root_component_declaration> EOF
+
+; =========================
+; Directives
+; =========================
+
+<import_directive_list> ::= <import_directive> <import_directive_list>
+                          | <empty>
+
+<import_directive> ::= KW_IMPORT STRING_LITERAL <import_alias_opt>
+<import_alias_opt> ::= KW_AS <import_alias>
+                     | <empty>
+<import_alias> ::= COMPONENT_NAME
+                 | IDENTIFIER
+
+; =========================
+; Components
+; =========================
+
+; Root component declaration (document-level, allows param/event)
+<root_component_declaration> ::= <documentation_comment_opt> <alias_prefix_opt> COMPONENT_NAME LBRACE <root_component_body> RBRACE
+
+<documentation_comment_opt> ::= <documentation_comment>
+                              | <empty>
+
+<documentation_comment> ::= DOC_COMMENT <documentation_comment>
+                          | DOC_COMMENT
+
+<alias_prefix_opt> ::= <alias_prefix>
+                     | <empty>
+
+<alias_prefix> ::= ALIAS_REF COLON
+
+<root_component_body> ::= <root_component_body_element> <root_component_body>
+                        | <empty>
+
+<root_component_body_element> ::= <property_assignment_with_opt_comma>
+                                | <mapping_assignment_with_opt_comma>
+                                | <event_subscription_with_opt_comma>
+                                | <template_param_assignment_with_opt_comma>
+                                | <parameter_declaration_with_opt_comma>
+                                | <event_declaration_with_opt_comma>
+                                | <each_block>
+                                | <component_declaration>
+
+; Child component declaration (nested, no param/event)
+<component_declaration> ::= <documentation_comment_opt> <alias_prefix_opt> COMPONENT_NAME LBRACE <component_body> RBRACE
+
+<component_body> ::= <component_body_element> <component_body>
+                   | <empty>
+
+<component_body_element> ::= <property_assignment_with_opt_comma>
+                           | <mapping_assignment_with_opt_comma>
+                           | <event_subscription_with_opt_comma>
+                           | <template_param_assignment_with_opt_comma>
+                           | <each_block>
+                           | <component_declaration>
+
+<property_assignment_with_opt_comma> ::= <property_assignment> <comma_opt>
+<mapping_assignment_with_opt_comma> ::= <mapping_assignment> <comma_opt>
+<event_subscription_with_opt_comma> ::= <event_subscription> <comma_opt>
+<template_param_assignment_with_opt_comma> ::= <template_param_assignment> <comma_opt>
+<parameter_declaration_with_opt_comma> ::= <parameter_declaration> <comma_opt>
+<event_declaration_with_opt_comma> ::= <event_declaration> <comma_opt>
+
+<comma_opt> ::= COMMA
+              | <empty>
+
+<property_assignment> ::= <property_name> COLON <expression>
+<property_name> ::= IDENTIFIER
+
+<mapping_assignment> ::= <property_name> <mapping_operator> <expression>
+<mapping_operator> ::= MAP_TO_PROPERTY
+                     | MAP_TO_DATA
+                     | MAP_TWO_WAY
+
+<event_subscription> ::= EVENT_REF COLON <expression>
+
+<template_param_assignment> ::= <parameter_name> FAT_ARROW <component_declaration>
+
+<parameter_declaration> ::= <documentation_comment_opt> KW_PARAM <type_name> <parameter_name> <parameter_default_opt>
+<parameter_default_opt> ::= COLON <expression>
+                          | MAP_TO_PROPERTY <expression>
+                          | <empty>
+
+<type_name> ::= <simple_type_name>
+              | <simple_type_name> LT <type_argument_list> GT
+
+<simple_type_name> ::= IDENTIFIER
+                     | COMPONENT_NAME
+
+<type_argument_list> ::= <type_name> <type_argument_list_tail>
+<type_argument_list_tail> ::= COMMA <type_name> <type_argument_list_tail>
+                            | <empty>
+
+<parameter_name> ::= IDENTIFIER
+
+<event_declaration> ::= <documentation_comment_opt> KW_EVENT <event_name> <event_arguments_opt>
+<event_name> ::= IDENTIFIER
+
+<event_arguments_opt> ::= <event_arguments>
+                        | <empty>
+
+<event_arguments> ::= LPAREN <event_argument_list_opt> RPAREN
+<event_argument_list_opt> ::= <event_argument_list>
+                            | <empty>
+
+<event_argument_list> ::= <event_argument> <event_argument_list_tail>
+<event_argument_list_tail> ::= COMMA <event_argument> <event_argument_list_tail>
+                             | <empty>
+
+<event_argument> ::= <type_name> <event_argument_name_opt>
+<event_argument_name_opt> ::= IDENTIFIER
+                            | <empty>
+
+<each_block> ::= KW_EACH <each_params_opt> <reference_expression> LBRACE PIPE <index_name> COMMA <value_name> PIPE <component_body> RBRACE
+               | KW_EACH <each_params_opt> <reference_expression> FAT_ARROW <template_param_name>
+<each_params_opt> ::= <each_params>
+                    | <empty>
+<each_params> ::= LPAREN <object_literal> RPAREN
+<index_name> ::= IDENTIFIER
+<value_name> ::= IDENTIFIER
+<template_param_name> ::= IDENTIFIER
+
+; =========================
+; Expressions (precedence climbing)
+; =========================
+
+; Top-level expression: conditional (ternary) has lowest precedence, right-associative
+<expression> ::= <conditional_expression>
+
+<conditional_expression> ::= <logical_or_expression> QUESTION <expression> COLON <expression>
+                           | <logical_or_expression>
+
+; Logical OR (precedence 10, left-associative)
+<logical_or_expression> ::= <logical_and_expression> <logical_or_expression_tail>
+<logical_or_expression_tail> ::= OR_OR <logical_and_expression> <logical_or_expression_tail>
+                               | <empty>
+
+; Logical AND (precedence 15, left-associative)
+<logical_and_expression> ::= <equality_expression> <logical_and_expression_tail>
+<logical_and_expression_tail> ::= AND_AND <equality_expression> <logical_and_expression_tail>
+                                | <empty>
+
+; Equality (precedence 20)
+<equality_expression> ::= <relational_expression> <equality_expression_tail>
+<equality_expression_tail> ::= EQ_EQ <relational_expression> <equality_expression_tail>
+                            | NOT_EQ <relational_expression> <equality_expression_tail>
+                            | <empty>
+
+; Relational (precedence 30) — includes <, >, <=, >=
+<relational_expression> ::= <additive_expression> <relational_expression_tail>
+<relational_expression_tail> ::= LT <additive_expression> <relational_expression_tail>
+                              | GT <additive_expression> <relational_expression_tail>
+                              | LT_EQ <additive_expression> <relational_expression_tail>
+                              | GT_EQ <additive_expression> <relational_expression_tail>
+                              | <empty>
+
+; Additive (precedence 40) — numeric only
+<additive_expression> ::= <multiplicative_expression> <additive_expression_tail>
+<additive_expression_tail> ::= PLUS <multiplicative_expression> <additive_expression_tail>
+                            | MINUS <multiplicative_expression> <additive_expression_tail>
+                            | <empty>
+
+; Multiplicative (precedence 50)
+<multiplicative_expression> ::= <unary_expression> <multiplicative_expression_tail>
+<multiplicative_expression_tail> ::= STAR <unary_expression> <multiplicative_expression_tail>
+                                  | SLASH <unary_expression> <multiplicative_expression_tail>
+                                  | PERCENT <unary_expression> <multiplicative_expression_tail>
+                                  | <empty>
+
+; Unary prefix (precedence 70)
+<unary_expression> ::= <prefix_operator> <unary_expression>
+                     | <postfix_expression>
+
+<prefix_operator> ::= BANG
+                    | PLUS
+                    | MINUS
+
+; Postfix: function call applied to primary
+<postfix_expression> ::= <primary_expression> <postfix_tail>
+<postfix_tail> ::= LPAREN <argument_list_opt> RPAREN <postfix_tail>
+                 | <empty>
+
+; Primary expressions
+<primary_expression> ::= <literal>
+                       | <reference_expression>
+                       | <struct_expression>
+                       | <resource_expression>
+                       | <new_expression>
+                       | <array_literal>
+                       | <typed_dictionary_literal>
+                       | <translate_expression>
+                       | <ntr_expression>
+                       | ENUM_VALUE
+                       | LPAREN <expression> RPAREN
+
+; Reference expression (variables, member access)
+<reference_expression> ::= <reference_head> <reference_tail>
+<reference_head> ::= GLOBAL_REF
+                   | ALIAS_REF
+                   | IDENTIFIER
+
+<reference_tail> ::= DOT IDENTIFIER <reference_tail>
+                   | <empty>
+
+<new_expression> ::= KW_NEW COMPONENT_NAME LBRACE <property_assignment_list_opt> RBRACE
+
+; =========================
+; Types, constructors, collections
+; =========================
+
+; Object literal (untyped key-value pairs)
+<object_literal> ::= LBRACE <property_assignment_list_opt> RBRACE
+
+<property_assignment_list_opt> ::= <property_assignment_list>
+                                 | <empty>
+
+<property_assignment_list> ::= <property_assignment> <property_assignment_list_tail>
+<property_assignment_list_tail> ::= COMMA <property_assignment> <property_assignment_list_tail>
+                                  | <empty>
+
+; Struct constructor: type(args) or type({ key: value })
+<struct_expression> ::= <struct_type_name> LPAREN <struct_initializer> RPAREN
+<struct_type_name> ::= IDENTIFIER
+                     | COMPONENT_NAME
+
+<struct_initializer> ::= <argument_list>
+                       | <named_initializer>
+
+<argument_list> ::= <expression> <argument_list_tail>
+<argument_list_tail> ::= COMMA <expression> <argument_list_tail>
+                       | <empty>
+
+<argument_list_opt> ::= <argument_list>
+                      | <empty>
+
+<named_initializer> ::= <object_literal>
+
+; Array literal: type[elements]
+<array_literal> ::= <type_name> LBRACKET <argument_list_opt> RBRACKET
+
+; Typed dictionary literal: DictType[KeyType, ValueType]{ entries }
+<typed_dictionary_literal> ::= COMPONENT_NAME LBRACKET <type_name> COMMA <type_name> RBRACKET LBRACE <typed_dictionary_entry_list_opt> RBRACE
+
+<typed_dictionary_entry_list_opt> ::= <typed_dictionary_entry_list>
+                                    | <empty>
+
+<typed_dictionary_entry_list> ::= <typed_dictionary_entry> <typed_dictionary_entry_list_tail>
+<typed_dictionary_entry_list_tail> ::= COMMA <typed_dictionary_entry> <typed_dictionary_entry_list_tail>
+                                     | <empty>
+
+<typed_dictionary_entry> ::= <expression> COLON <expression>
+
+; Resource loading functions
+<resource_expression> ::= <resource_keyword> LPAREN <expression> RPAREN
+<resource_keyword> ::= KW_IMAGE
+                     | KW_FONT
+                     | KW_AUDIO
+                     | KW_VIDEO
+
+; =========================
+; Translation expressions (i18n)
+; =========================
+
+; tr("msgid") or tr("msgid", { context: "ctx", name: expr })
+<translate_expression> ::= KW_TR LPAREN STRING_LITERAL RPAREN
+                         | KW_TR LPAREN STRING_LITERAL COMMA <translate_options> RPAREN
+
+; ntr("singular", "plural", count) or ntr("singular", "plural", count, { ... })
+<ntr_expression> ::= KW_NTR LPAREN STRING_LITERAL COMMA STRING_LITERAL COMMA <expression> RPAREN
+                   | KW_NTR LPAREN STRING_LITERAL COMMA STRING_LITERAL COMMA <expression> COMMA <translate_options> RPAREN
+
+; Options object: { context: "ctx", name: expr, ... }
+<translate_options> ::= LBRACE <translate_option_list_opt> RBRACE
+
+<translate_option_list_opt> ::= <translate_option_list>
+                              | <empty>
+
+<translate_option_list> ::= <translate_option> <translate_option_list_tail>
+<translate_option_list_tail> ::= COMMA <translate_option> <translate_option_list_tail>
+                               | <empty>
+
+; "context" is a reserved key mapped to gettext msgctxt; others are placeholder args
+<translate_option> ::= KW_CONTEXT COLON STRING_LITERAL
+                     | IDENTIFIER COLON <expression>
+
+; =========================
+; Literals
+; =========================
+
+<literal> ::= TRUE_LITERAL
+            | FALSE_LITERAL
+            | INTEGER_LITERAL
+            | REAL_LITERAL
+            | STRING_LITERAL
+            | TEMPLATE_STRING_LITERAL
+            | NULL_LITERAL
+
+; =========================
+; Utility
+; =========================
+
+<empty> ::=
+
+; =========================
+; Terminal token contract
+; =========================
+; The lexer MUST emit the following terminal tokens.
+;
+; Keywords:
+;   KW_IMPORT, KW_AS, KW_PARAM, KW_EVENT, KW_EACH, KW_NEW,
+;   KW_IMAGE, KW_FONT, KW_AUDIO, KW_VIDEO
+;
+; Identifiers and refs:
+;   IDENTIFIER, COMPONENT_NAME, GLOBAL_REF, ALIAS_REF, EVENT_REF, ENUM_VALUE, DOC_COMMENT
+;
+; Literals:
+;   STRING_LITERAL, TEMPLATE_STRING_LITERAL,
+;   INTEGER_LITERAL, REAL_LITERAL, TRUE_LITERAL, FALSE_LITERAL, NULL_LITERAL
+;
+; Operators and punctuators:
+;   COLON (:), MAP_TO_PROPERTY (:=), MAP_TO_DATA (=:), MAP_TWO_WAY (<=>),
+;   FAT_ARROW (=>),
+;   COMMA (,), DOT (.), PIPE (|), QUESTION (?),
+;   LPAREN, RPAREN, LBRACE, RBRACE, LBRACKET ([), RBRACKET (]),
+;   OR_OR (||), AND_AND (&&), EQ_EQ (==), NOT_EQ (!=),
+;   LT (<), GT (>), LT_EQ (<=), GT_EQ (>=),
+;   PLUS (+), MINUS (-), STAR (*), SLASH (/), PERCENT (%), BANG (!)
+;
+; End token:
+;   EOF

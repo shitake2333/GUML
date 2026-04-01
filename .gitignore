@@ -19,7 +19,7 @@ mono_crash.*.json
 
 # Visual studio
 .vs/
-
+.vscode/
 Builds/
 
 # Ignore stub bin and obj folders
@@ -30,3 +30,5 @@ nupkg/
 
 *_plan.md
 .github/*-instructions.md
+
+artifacts/

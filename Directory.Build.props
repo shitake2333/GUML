@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <Authors>shitake233</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/shitake2333/GUML</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+</Project>

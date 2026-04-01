@@ -1,0 +1,9 @@
+{
+    "Hello World!": "你好，世界！",
+    "Hello, {name}!": "你好，{name}！",
+    "adjective|New": "新的",
+    "verb|New": "新建",
+    "One item": "一个项目",
+    "{count} items": "{count} 个项目",
+    "Role": "角色"
+}

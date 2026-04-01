@@ -1,0 +1,114 @@
+// ============================================================
+// 03 - Expressions (§6)
+// Demo: unary, binary, precedence, ternary, member-access, call
+// ============================================================
+
+VBoxContainer {
+    size_flags_horizontal: .Fill
+
+    // --- Controls: adjust values to watch expressions update live ---
+    Label {
+        text: "―― Controls ――",
+        horizontal_alignment: .Center,
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    // Score stepper
+    HBoxContainer {
+        Label { text: "Score", custom_minimum_size: vec2(52, 0) }
+        Button { text: "-10", #pressed: $controller.dec_score }
+        Label {
+            text := $"{$controller.score}",
+            custom_minimum_size: vec2(36, 0),
+            horizontal_alignment: .Center
+        }
+        Button { text: "+10", #pressed: $controller.inc_score }
+    }
+
+    // Health slider
+    HBoxContainer {
+        Label { text: "Health", custom_minimum_size: vec2(52, 0) }
+        HSlider {
+            min_value: 0, max_value: 100, step: 1, value: 75,
+            size_flags_horizontal: .Fill,
+            #value_changed: $controller.on_health_changed
+        }
+        Label { text := $"{$controller.health:.0f}", custom_minimum_size: vec2(28, 0) }
+    }
+
+    // Level stepper
+    HBoxContainer {
+        Label { text: "Level", custom_minimum_size: vec2(52, 0) }
+        Button { text: "-", #pressed: $controller.dec_level }
+        Label {
+            text := $"{$controller.level}",
+            custom_minimum_size: vec2(28, 0),
+            horizontal_alignment: .Center
+        }
+        Button { text: "+", #pressed: $controller.inc_level }
+        Button {
+            text := $controller.is_vip ? "VIP ON" : "VIP OFF",
+            modulate := $controller.is_vip ? color(1.0, 0.8, 0.2, 1.0) : color(0.6, 0.6, 0.6, 1.0),
+            #pressed: $controller.toggle_vip
+        }
+    }
+
+    // --- §6.2.1 Prefix (unary) operators ---
+    Label {
+        text: "-- Unary: !  - --",
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    // Toggle VIP to watch logical-not flip
+    Label {
+        visible := !$controller.is_vip,
+        text: "Visible when NOT VIP  (!$controller.is_vip)"
+    }
+
+    // --- §6.2.2 Binary operators ---
+    Label {
+        text: "-- Binary: arithmetic, compare, logic --",
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    Label { text := $"score % 10 = {$controller.score % 10}" }
+    Label { text := $"score + 5  = {$controller.score + 5}" }
+    Label { text := $"health / 2 = {$controller.health / 2:.1f}" }
+
+    // --- §6.2.4 Ternary operator ---
+    Label {
+        text: "-- Ternary ---",
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    Label {
+        text := $controller.is_vip ? "VIP User" : "Normal User",
+        modulate := $controller.is_vip ? color(1.0, 0.8, 0.2, 1.0) : color(0.7, 0.7, 0.7, 1.0)
+    }
+
+    // Health color: green when > 50, red otherwise
+    ProgressBar {
+        min_value: 0, max_value: 100,
+        value := $controller.health,
+        modulate := $controller.health > 50 ? color(0, 1, 0, 1) : color(1, 0, 0, 1)
+    }
+
+    // Nested ternary for level tier
+    Label {
+        text := $"Level {$controller.level}: {$controller.level > 10 ? "Expert" : $controller.level > 5 ? "Intermediate" : "Beginner"}"
+    }
+
+    // Score thresholds
+    Label {
+        text := $"Score {$controller.score}: {$controller.score == 100 ? "Perfect!" : $controller.score > 80 ? "High Score" : "Keep Going"}",
+        modulate := $controller.score == 100 ? color(1, 0.8, 0.2, 1) : color(0.9, 0.9, 0.9, 1)
+    }
+
+    // --- §6.5 Member access  §6.6 Call expression ---
+    Label {
+        text: "-- Member access + Call ---",
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+    Label { text := $controller.data.name }
+    Label { text := $controller.format_name($controller.first_name, $controller.last_name) }
+}

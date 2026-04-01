@@ -1,44 +1,48 @@
 # Quick Start
 
-## Install
+GUML (Godot UI Markup Language) is a declarative markup language for building user interfaces in Godot .NET applications. This guide walks you through installation, project setup, and common usage patterns.
 
-use nuget:
-```
-dotnet add package GUML --version 0.0.2
-```
+For complete syntax details, see [guml_syntax.md](guml_syntax.md).
 
-## initialization
-- Calling the GUML initialization function
-```c#
-Guml.Init();
-```
-- Add Controller Assembly
-```c#
-Guml.Assemblies.Add(typeof(CONTROLLER_CLASS).Assembly);
-```
-If the Controller is scattered in multiple Assemblies, all need to be added.
+---
 
-For example, if multiple Mods define new Controllers, you need to add the Assembly corresponding to each Mod.
+## Installation
 
-- Add Controller Namespace
-```c#
-Guml.ControllerNamespaces.Add("CONTROLLER_NAMESPACE");
+Add the NuGet packages to your Godot .NET project:
+
+```
+dotnet add package GUML
+dotnet add package GUML.SourceGenerator
 ```
 
-- Implement resource loader
-```c#
-Guml.ResourceLoader += resPath => {
-    // ResourceLoader Implement
-}
-```
-**GUML** does not provide a resource loader by default. This is to facilitate collaboration with the game's own runtime resource loading cache. You can implement your own loader and design the relevant resource caching algorithm according to your needs.
+Then register your `.guml` files as additional files so the source generator can process them. Add the following to your `.csproj`:
 
-- Load `.guml` file
-```c#
-Guml.LoadGuml(Root,"gui/main.guml");
+```xml
+<ItemGroup>
+  <!-- Register .guml files for source generation -->
+  <AdditionalFiles Include="gui\**\*.guml" />
+</ItemGroup>
 ```
-The first parameter of the `Guml.LoadGuml` method is the root node of the GUI. The second parameter is the address of the guml file.
-### Example
+
+If you use custom GUI component types in your own namespaces, also configure:
+
+```xml
+<PropertyGroup>
+  <!-- Semicolon-separated namespaces containing custom GUI components -->
+  <GumlNamespaces>MyGame.GUI;MyGame.Widgets</GumlNamespaces>
+</PropertyGroup>
+
+<ItemGroup>
+  <CompilerVisibleProperty Include="GumlNamespaces" />
+</ItemGroup>
+```
+
+---
+
+## Initialization
+
+Initialize GUML in your root Node's `_Ready()` method:
+
 ```c#
 using Godot;
 using GUML;
@@ -46,182 +50,431 @@ using GUML;
 public partial class Main : Node
 {
     [Export]
-	public Node Root;
+    public Node Root;
 
-	private GuiController _controller;
-    
+    private GuiController _controller;
+
     public override void _Ready()
-	{
-		Guml.Init();
-		Guml.Assemblies.Add(typeof(MainController).Assembly);
-		Guml.ControllerNamespaces.Add("GUI");
-		Guml.ResourceLoader += resPath =>
-		{
-			var type = Path.GetExtension(resPath);
-			switch (type)
-			{
-				case "png":
-					return ImageTexture.CreateFromImage(Image.LoadFromFile(resPath));
-				case "ogg":
-					return AudioStreamOggVorbis.LoadFromFile(resPath);
-				case "ttf":
-				case "woff":
-				case "woff2":
-				case "pfb":
-				case "pfm":
-				case "otf":
-					var font = new FontFile();
-					font.LoadDynamicFont(resPath);
-					return font;
-				default:
-					throw new Exception($"Error resource type('{type}').");
-			}
-		};
-        _controller = Guml.LoadGuml(Root,"gui/main.guml");
-	}
-   
-   	public override void _Process(double delta)
-	{
-		_controller?.Update();
+    {
+        Guml.Init();
+        Guml.ResourceProvider = new DefaultResourceProvider();
+        _controller = Guml.LoadGuml(Root, "gui/main.guml");
+    }
 
-	}
+    public override void _Process(double delta)
+    {
+        _controller?.Update();
+    }
 
-	public override void _ExitTree()
-	{
-		_controller?.Dispose();
-	} 
+    public override void _ExitTree()
+    {
+        _controller?.Dispose();
+    }
 }
 ```
 
-## `XxxController` class and `xxx.guml` file
-Every guml file has a corresponding `Controller` class. **GUML** will automatically create its corresponding 
-controller class instance and bind the two when loading the `guml` file.
+- `Guml.Init()`  initializes the GUML runtime.
+- `Guml.ResourceProvider`  sets the resource loader. `DefaultResourceProvider` provides built-in caching and reference-counted lifecycle management. Implement `IResourceProvider` for custom loading logic.
+- `Guml.LoadGuml(rootNode, path)`  loads a `.guml` file, attaches the generated UI to `rootNode`, and returns the controller instance.
+- `Guml.DefaultTheme`  an optional static property to set a default theme applied to all UI components.
 
-Of course, you need to add the controller corresponding to Assembly and namespace to the `Guml.Assemblies` and 
-`Guml.ControllerNamespaces` lists. This will allow you to find the correct controller type when creating it.
+---
 
-## Controller object
-Controller object all inherit from `GuiController` and have the `INotifyPropertyChanged` interface. 
+## Controller and GUML File
 
-### Controller lifecycle overview:
+Every `.guml` file has a paired C# controller class. The naming convention is: convert the file name to PascalCase and append `Controller`. For example, `main.guml`  `MainController`.
 
-| Method   | When                                                            | Description    |
-|----------|-----------------------------------------------------------------|----------------|
-| Created  | After object initialization and binding width guml is completed | Automatic call |
-| Update   | Executed every frame, same as `Node._Process`                   | Manual call    |
-| Dispose* | When the Controller is destroyed                                | Manual call    |
+Annotate your controller with `[GumlController]` and declare it as `partial`:
 
-*`Dispose` will automatically remove the bound GUI node from the Godot node tree*
+```c#
+using GUML;
 
-### NameNode and GumlRootNode
-In guml, you can reference the required components at any time by using component aliases. These alias components 
-can be accessed through `NameNode` in the controller.
-
-### `import` Syntax
-The guml file supports importing another defined guml file through the `import` keyword. 
-
-If you use `import`, you need to define a property with the same name and type as the controller corresponding to 
-the imported guml file in the controller class corresponding to the current file, so that the controller corresponding to the imported guml file can be bound to the current controller when it is imported.
-
-### Example:
-
-`main.guml`
+[GumlController("../../gui/main.guml")]
+public partial class MainController : GuiController
+{
+    public override void Created()
+    {
+        // Called after the UI tree is built and all bindings are established.
+    }
+}
 ```
-import "setting"
 
+The `[GumlController]` attribute path is relative to the controller source file.
+
+### Controller Lifecycle
+
+Every controller inherits from `GuiController` and implements `INotifyPropertyChanged`.
+
+| Method | When called | Notes |
+|--------|-------------|-------|
+| `Created()` | After the UI tree is built and all bindings are set up | Called automatically by `LoadGuml` |
+| `Update()` | Every frame  equivalent to `Node._Process` | Call manually in `_Process` |
+| `Dispose()` | When the controller is destroyed | Call manually in `_ExitTree`. Automatically removes the bound GUI node from the scene tree. |
+
+---
+
+## Source Generator
+
+GUML uses a Roslyn source generator (`GUML.SourceGenerator`) that compiles `.guml` files into strongly-typed C# classes at build time, providing compile-time error checking and zero-reflection runtime loading.
+
+### How It Works
+
+For each `[GumlController]`-annotated class the generator produces:
+
+1. **View class** (`XxxGumlView.g.cs`): A `Build()` method that constructs the UI tree. A `[ModuleInitializer] Register()` method that registers the view factory into `Guml.ViewRegistry` automatically.
+2. **Controller partial** (`XxxController.NamedNodes.g.cs`): Strongly-typed properties for all `@alias` named nodes and imported controller instances. Only generated when the controller is `partial` and the `.guml` file has aliases or imports.
+
+`Guml.LoadGuml()` looks up the registered factory in `Guml.ViewRegistry`. If found, it instantiates the controller and calls `Build()`  no reflection. If not found, a `GumlRuntimeException` is thrown with guidance to add `[GumlController]`.
+
+### Named Nodes (`@alias`)
+
+Use `@name:` before a component declaration to name it. The source generator injects a strongly-typed property for it on the controller.
+
+`main.guml`:
+```
 Panel {
     @hello_label: Label {
         text: "hello"
     }
 }
 ```
-`MainController.cs`
+
+Auto-generated (`MainController.NamedNodes.g.cs`):
 ```c#
-class MainController : RguiController 
+public partial class MainController
 {
-    public SettingController SettingController;
-    
-    public override void Created()
+    /// <summary>Named node '@hello_label' (Label).</summary>
+    public Label HelloLabel { get; internal set; }
+}
+```
+
+Access it in the controller with full type safety:
+```c#
+public override void Created()
+{
+    HelloLabel.Text = "Updated!";   // compile-time type check 
+    HelloLabel.Modulate = Colors.Red;
+}
+```
+
+The alias name uses `snake_case` in GUML and is converted to `PascalCase` for the C# property (`hello_label`  `HelloLabel`).
+
+### Imported Component Controllers
+
+When a `.guml` file imports another component, the source generator automatically produces a typed property on the controller:
+
+`main.guml`:
+```
+import "panel/setting"
+
+Panel {
+    Setting {}
+}
+```
+
+Auto-generated:
+```c#
+public partial class MainController
+{
+    /// <summary>Import controller for 'panel/setting.guml'.</summary>
+    public SettingController SettingController { get; set; }
+}
+```
+
+If you manually define the property in your controller, the generator detects it and skips generation.
+
+### Diagnostics
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| GUML005 | Error | `.guml` file not found in AdditionalFiles |
+| GUML006 | Error | Multiple controllers reference the same `.guml` file |
+| GUML007 | Warning | Controller not declared as `partial`  named node properties cannot be generated |
+
+---
+
+## Data Binding
+
+GUML supports binding controller properties to UI component properties using `:=`. When the controller property changes (calls `OnPropertyChanged()`), the UI updates automatically.
+
+### Making Properties Bindable
+
+All properties involved in bindings must call `OnPropertyChanged()` in their setter:
+
+```c#
+public partial class MainController : GuiController
+{
+    private string _userName = "Player";
+
+    public string UserName
     {
-        GD.Print(NameNode["hello_label"].); //print hello
+        get => _userName;
+        set
+        {
+            _userName = value;
+            OnPropertyChanged();  // required to trigger UI updates
+        }
     }
 }
 ```
-The root node of guml will be assigned to the GumlRootNode property of Controller after binding.
 
-## Data binding
+### One-Way Binding (Data  UI)
 
-**GUML** supports one-way binding from data to UI components.In guml files, data binding is done using the `:=` 
-syntax. Of course, it not only supports property binding, but also supports expression binding, so that when the properties in the expression change, the properties of the UI component will also change accordingly.
+Use `:=` to bind a controller property to a UI property:
 
-It should be noted that all properties involved in the binding expression need to write setters so that `OnPropertyChanged` is called when the value changes.
-
-The datasource specified by the each syntax must be a collection type that implements the `INotifyListChanged`
-interface. **GUML** provides the `NotifyList<T>` type, which is similar to `List<T>`, but implements the
-`INotifyListChanged` interface
-to trigger the `ListChanged` event when collection elements are added or deleted.
-
-Example:
-
-`main.guml`
+`main.guml`:
 ```
 Panel {
     Label {
         position: vec2(10, 10),
         size: vec2(200, 30),
-        text:= "hello " + $controller.SayHello
+        text := $controller.user_name
     }
-    
-    each $controller.Names { |index, name|
+}
+```
+
+**Expression binding**  the UI re-evaluates whenever any referenced property changes:
+
+```
+Label {
+    text := $"Hello, {$controller.user_name}! Score: {$controller.score}"
+}
+```
+
+### Two-Way Binding
+
+Use `<=>` for symmetric binding between a component property and a controller property. The right-hand side must be a writable controller property. Requires the component to support property change notifications.
+
+```
+CustomToggle {
+    checked <=> $controller.is_enabled
+}
+```
+
+### List Rendering with `NotifyList<T>`
+
+The data source for `each` blocks must implement `INotifyListChanged`. GUML provides `NotifyList<T>`:
+
+```c#
+public NotifyList<string> Names
+{
+    get => _names;
+    set
+    {
+        _names = value;
+        OnPropertyChanged();
+    }
+}
+private NotifyList<string> _names = new() { "Alice", "Bob" };
+```
+
+`main.guml`:
+```
+Panel {
+    each $controller.names { |idx, name|
         Control {
-            size: vec2(220, 100),
-            custom_minimum_size: vec2(220, 100),
+            custom_minimum_size: vec2(220, 40),
             Label {
                 position: vec2(10, 10),
-                size: vec2(200, 30),
                 text: name
             }
         }
-    }         
+    }
 }
 ```
-`MainController.cs`
+
+**Incremental updates:** Calling `Names.Add(...)` only creates nodes for the new item. Other list mutations (Remove, Insert, Clear) trigger a full re-render.
+
+---
+
+## Internationalization (i18n)
+
+GUML provides built-in `tr()` and `ntr()` expressions for text translation, following the gettext convention.
+
+### Setup
+
+Implement the `IStringProvider` interface and assign it at startup:
+
 ```c#
-public class MainController : GuiController
+public override void _Ready()
 {
-    public NotifyList<string> Names {
-        get => _names;
-        set
-        {
-            _names = value;
-            OnPropertyChanged();
-        }
-        
-    }
-    
-    public string SayHello {
-        get => _sayHello;
-        set
-        {
-            _sayHello = value;
-            OnPropertyChanged();
-        }
-    }
-
-    private string _sayHello = "world!";
-    public NotifyList<string> _names = ["bob", "james"];
+    Guml.Init();
+    Guml.ResourceProvider = new DefaultResourceProvider();
+    Guml.StringProvider = new MyStringProvider(); // your IStringProvider implementation
+    _controller = Guml.LoadGuml(Root, "gui/main.guml");
 }
 ```
-When we update `MainController.SeyHello`, the text on the Label will also change.
 
-## guml file
-Regarding guml files, a more detailed description can be found in the [guml syntax](guml_syntax.md) section.
+`IStringProvider` requires:
+- `Tr(msgid, context?, args?)` — singular translation.
+- `Ntr(singular, plural, count, context?, args?)` — plural translation.
+- `INotifyPropertyChanged` — raise `PropertyChanged("CurrentLocale")` on locale switch.
 
-## Theme overrides
-In the godot editor, you can use `ThemeOverrides` to set theme overrides for UI components. But there is no direct 
-interface in the code. **GUML** provides a fake `ThemeOverrides` property. Its value is an object object. You can use the 
-same properties to set the UI component's theme overrides as in the editor(For specific key names, see `GUML.ThemeOverrides`). 
+When `Guml.StringProvider` is `null`, `tr()` returns the msgid unchanged.
 
-The `ThemeOverrides` static property of the Guml class provides all optional theme override entries for a component and specifies their data types.
+### Usage in GUML
 
-The `DefaultTheme` static property of Guml can set the default theme for all UI components.
+```
+Label { text: tr("Start Game") }
+Label { text := tr("Hello, {name}!", { name: $controller.user_name }) }
+Label { text := ntr("One item", "{count} items", $controller.item_count,
+                    { count: $controller.item_count }) }
+```
+
+When used with `:=`, translations automatically re-evaluate on locale changes.
+
+For full syntax details, see the [Translation Expressions](guml_syntax.md#translation-expressions-i18n) section in the syntax reference.
+
+---
+
+## Complete Example
+
+### Project Structure
+
+```
+MyGame/
+  Main.cs
+  gui/
+    main.guml
+    MainController.cs
+    panel/
+      setting.guml
+      SettingController.cs
+```
+
+### `gui/main.guml`
+
+```
+import "panel/setting"
+
+Panel {
+    @title_label: Label {
+        position: vec2(10, 10),
+        size: vec2(400, 40),
+        text := $"Welcome, {$controller.player_name}!"
+    }
+
+    @start_btn: Button {
+        position: vec2(10, 60),
+        size: vec2(120, 40),
+        text: "Start Game",
+        #pressed: $controller.on_start_pressed
+    }
+
+    Setting {
+        position: vec2(10, 110)
+    }
+
+    each $controller.scores { |idx, score|
+        Control {
+            custom_minimum_size: vec2(400, 30),
+            Label {
+                text: $"{idx + 1}. {score.name}: {score.value}"
+            }
+        }
+    }
+}
+```
+
+### `gui/MainController.cs`
+
+```c#
+using Godot;
+using GUML;
+
+[GumlController("main.guml")]
+public partial class MainController : GuiController
+{
+    private string _playerName = "Player";
+
+    public string PlayerName
+    {
+        get => _playerName;
+        set { _playerName = value; OnPropertyChanged(); }
+    }
+
+    public NotifyList<ScoreEntry> Scores { get; } = new();
+
+    public override void Created()
+    {
+        // TitleLabel and StartBtn are auto-generated from @alias declarations
+        GD.Print(TitleLabel.Text);
+    }
+
+    private void OnStartPressed()
+    {
+        GD.Print("Game started!");
+    }
+}
+
+public record ScoreEntry(string Name, int Value);
+```
+
+### `Main.cs` (Root Node)
+
+```c#
+using Godot;
+using GUML;
+
+public partial class Main : Node
+{
+    [Export] public Node Root;
+
+    private GuiController _controller;
+
+    public override void _Ready()
+    {
+        Guml.Init();
+        Guml.ResourceProvider = new DefaultResourceProvider();
+        _controller = Guml.LoadGuml(Root, "gui/main.guml");
+    }
+
+    public override void _Process(double delta)
+    {
+        _controller?.Update();
+    }
+
+    public override void _ExitTree()
+    {
+        _controller?.Dispose();
+    }
+}
+```
+
+---
+
+## Theme Overrides
+
+GUML provides a `ThemeOverrides` property on components that mirrors the editor's ThemeOverrides panel. Its value is an object literal:
+
+```
+Button {
+    theme_override_colors_font_color: color(1.0, 1.0, 1.0, 1.0),
+    theme_override_font_sizes_font_size: 16,
+    theme_override_styles_normal: style_box_flat({
+        bg_color: color(0.2, 0.2, 0.8, 1.0),
+        corner_radius_top_left: 4,
+        corner_radius_top_right: 4,
+        corner_radius_bottom_left: 4,
+        corner_radius_bottom_right: 4
+    })
+}
+```
+
+`Guml.ThemeOverrides`  a static property providing all available theme override entries and their types.
+
+`Guml.DefaultTheme`  a static property to set a default theme applied to all UI components globally.
+
+---
+
+## GUML Syntax Reference
+
+See [guml_syntax.md](guml_syntax.md) for the complete syntax reference, including:
+- All value types (strings, template strings, enums, arrays, typed dictionaries, vectors, colors, resource loaders, etc.)
+- Expressions and operators (arithmetic, logical, ternary, member access, call expressions)
+- Property mapping operators (`:`, `:=`, `=:`, `<=>`)
+- List rendering (`each` block form and projection form)
+- Parameter declarations (`param`)
+- Event declarations (`event`)
+- Comma separator rules
+- Identifier naming conventions

@@ -1,0 +1,13 @@
+Control {
+    param string text,
+    param Vec2 size,
+    param Vec2 position,
+    event pressed
+
+    Label {
+        position: $root.position,
+        size: $root.size,
+        text: $root.text,
+        #pressed: $root.pressed
+    }
+}

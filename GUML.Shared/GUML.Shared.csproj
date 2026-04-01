@@ -7,14 +7,10 @@
     <Nullable>enable</Nullable>
 
     <PackageId>GUML.Shared</PackageId>
-    <Version>0.2.0</Version>
-    <Authors>shitake233</Authors>
+    <Version>0.3.0</Version>
     <Description>Shared infrastructure for GUML: full-fidelity CST parser, API metadata models, and diagnostics. Used by GUML.SourceGenerator, GUML.LSP, and GUML.ApiGenerator.</Description>
-    <PackageProjectUrl>https://github.com/molingyu/GUML</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/molingyu/GUML</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/shitake2333/GUML</PackageProjectUrl>
     <PackageTags>Godot GUML Shared</PackageTags>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>

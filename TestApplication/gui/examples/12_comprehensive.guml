@@ -1,0 +1,113 @@
+// ============================================================
+// 12 - Comprehensive Demo: User Management Panel
+// Combines all GUML features
+// ============================================================
+
+import "../components/MyButton.guml"
+import "../components/SearchBar.guml"
+
+/// user_management_panel
+@root_panel: PanelContainer {
+
+    // Parameter declarations — configurable by parent
+    param string page_title: "User Management"
+    param bool allow_edit: true
+
+    // Event declarations — subscribable by parent
+    event on_user_selected(int user_id)
+    event on_refresh
+
+    VBoxContainer {
+        // --- Title bar ---
+        HBoxContainer {
+            @page_title: Label {
+                text: $root.page_title,
+                label_settings: new LabelSettings { font_size: 24 },
+                size_flags_horizontal: .Fill
+            }
+
+            MyButton {
+                button_text: "Refresh",
+                is_primary: true,
+                #on_clicked: $root.on_refresh
+            }
+        }
+
+        // --- Search bar (imported component) ---
+        SearchBar {
+            placeholder: "Search users...",
+            #on_search: $controller.filter_users,
+            #on_clear: $controller.clear_filter
+        }
+
+        // --- Stats (template strings + data binding) ---
+        Label {
+            text := $"Total: {$controller.total_users} | Active: {$controller.active_count} | Filtered: {$controller.filtered_count}",
+            modulate: color(0.7, 0.7, 0.7, 1.0)
+        }
+
+        // --- User list (each + conditional expressions) ---
+        ScrollContainer {
+            size_flags_vertical: .Fill
+
+            VBoxContainer {
+                size_flags_horizontal: .Fill
+
+                each $controller.filtered_users { |idx, user|
+                    HBoxContainer {
+                        custom_minimum_size: vec2(0, 40),
+                        modulate := idx % 2 == 0 ? color(1, 1, 1, 1) : color(0.9, 0.9, 0.95, 1)
+
+                        // Icon placeholder (no Texture2D field needed)
+                        ColorRect {
+                            custom_minimum_size: vec2(32, 32),
+                            color := user.is_active ? color(0.2, 0.7, 0.2, 0.8) : color(0.5, 0.5, 0.5, 0.5)
+                        }
+
+                        // User info
+                        VBoxContainer {
+                            size_flags_horizontal: .Fill
+
+                            Label {
+                                text := $"{user.display_name}",
+                                label_settings: new LabelSettings { font_size: 14 }
+                            }
+
+                            Label {
+                                text := $"ID: {user.id} | {user.is_active ? "Active" : "Inactive"}",
+                                modulate := user.is_active ? color(0, 0.8, 0, 1) : color(0.8, 0, 0, 1)
+                            }
+                        }
+
+                        // Action buttons
+                        HBoxContainer {
+                            Button {
+                                text: "Select",
+                                #pressed: $controller.select_user(user.id)
+                            }
+
+                            Button {
+                                text: "Toggle",
+                                visible: $root.allow_edit,
+                                #pressed: $controller.edit_user(user.id)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Bottom status bar ---
+        HBoxContainer {
+            Label {
+                text := $controller.is_loading ? "Loading..." : "Ready",
+                size_flags_horizontal: .Fill
+            }
+
+            @loading_indicator: ProgressBar {
+                visible := $controller.is_loading,
+                custom_minimum_size: vec2(100, 0)
+            }
+        }
+    }
+}

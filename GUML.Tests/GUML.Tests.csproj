@@ -20,7 +20,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GUML\GUML.csproj" />
-    <ProjectReference Include="..\RegexTokenizeGenerator\RegexTokenizeGenerator.csproj" />
   </ItemGroup>
 
 </Project>

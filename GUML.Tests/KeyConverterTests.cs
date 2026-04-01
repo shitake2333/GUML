@@ -1,4 +1,6 @@
-﻿namespace GUML.Tests;
+﻿using GUML.Shared.Converter;
+
+namespace GUML.Tests;
 
 [TestClass]
 public class KeyConverterTests
@@ -59,25 +61,4 @@ public class KeyConverterTests
         Assert.AreEqual("my_h_t_t_p_client", result);
     }
 
-    [TestMethod]
-    public void Convert_StringInput_ReturnsPascalCase()
-    {
-        var converter = new KeyConverter();
-        var result = converter.Convert("text_value");
-        Assert.AreEqual("TextValue", result);
-    }
-
-    [TestMethod]
-    public void Convert_NonStringInput_ThrowsException()
-    {
-        var converter = new KeyConverter();
-        Assert.ThrowsExactly<Exception>(() => converter.Convert(42));
-    }
-
-    [TestMethod]
-    public void ConverterType_IsKeyName()
-    {
-        var converter = new KeyConverter();
-        Assert.AreEqual(ConverterType.KeyName, converter.ConverterType);
-    }
 }

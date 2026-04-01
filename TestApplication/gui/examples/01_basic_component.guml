@@ -1,0 +1,68 @@
+// ============================================================
+// 01 - Basic Components (§4.1, §8.1, §8.2, §8.5)
+// Demo: root component, child nesting, property assignment, comma separation
+// ============================================================
+
+// Root component — every .guml has exactly one root
+VBoxContainer {
+    size_flags_horizontal: .Fill
+
+    // --- Syntax Demo: Static Layout ---
+
+    // Properties use  property_name: expression  (static assignment)
+    Label {
+        text: "Hello, GUML!",
+        horizontal_alignment: .Center
+    }
+
+    // Commas are required between adjacent properties, trailing comma is optional
+    Label { text: "With commas", visible: true }
+
+    Label {
+        text: "Trailing comma is optional",
+        visible: true
+    }
+
+    // Multi-level nesting — children added in declaration order
+    HBoxContainer {
+        Label { text: "Nested Left" }
+        Label { text: "Nested Right" }
+    }
+
+    // --- Live Demo: Click Counter + Color Cycling ---
+
+    // := one-way binding: re-evaluates whenever controller raises PropertyChanged
+    Label {
+        text := $"Clicked {$controller.click_count} times",
+        horizontal_alignment: .Center,
+        modulate := $controller.click_count > 0
+                    ? color(0.4, 1.0, 0.5, 1.0)
+                    : color(0.7, 0.7, 0.7, 1.0)
+    }
+
+    HBoxContainer {
+        Button {
+            text: "+ Click",
+            size_flags_horizontal: .Fill,
+            #pressed: $controller.on_click
+        }
+        Button {
+            text: "Reset",
+            disabled := $controller.click_count == 0,
+            #pressed: $controller.reset_count
+        }
+    }
+
+    // ColorRect shows the currently selected color live
+    ColorRect {
+        custom_minimum_size: vec2(0, 32),
+        size_flags_horizontal: .Fill,
+        color := $controller.current_color
+    }
+
+    Button {
+        text := $"Cycle Color: {$controller.color_name}",
+        size_flags_horizontal: .Fill,
+        #pressed: $controller.cycle_color
+    }
+}

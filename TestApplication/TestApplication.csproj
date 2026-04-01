@@ -1,15 +1,14 @@
-<Project Sdk="Godot.NET.Sdk/4.4.1">
+<Project Sdk="Godot.NET.Sdk/4.6.0">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GumlNamespaces>TestApplication.scripts.notebook</GumlNamespaces>
   </PropertyGroup>
+
   <ItemGroup>
-    <ProjectReference Include="..\GUML\GUML.csproj" />
-    <TrimmerRootAssembly Include="GodotSharp" />
-    <TrimmerRootAssembly Include="$(TargetName)" />
-  </ItemGroup>
-  <ItemGroup>
-    <Content Include="gui\main.guml" />
-    <Content Include="gui\panel\setting.guml" />
+    <PackageReference Include="Markdig" Version="1.1.2" />
+    <PackageReference Include="TextMateSharp.Grammars" Version="2.0.3" />
+    <PackageReference Include="GUML" Version="0.3.0" />
+    <PackageReference Include="GUML.SourceGenerator" Version="0.3.0" />
   </ItemGroup>
 </Project>

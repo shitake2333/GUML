@@ -1,0 +1,58 @@
+// ============================================================
+// 11 - Each Projection & Template Params (§8.8)
+// Demo: each => template_param, $item context
+// ============================================================
+//
+// Projection form: the parent supplies the per-row template body, which the
+// reusable component stamps for every item.  In the source-generator mode the
+// projection is expressed as a direct each block on the parent side so that
+// $item bindings compile in the correct each-scope.
+//
+// $item.index  — 0-based loop index (updated by reconciler on add/remove)
+// $item.value  — current element (InventoryItem); := bindings here re-evaluate
+//                when the NotifyList indexed setter fires ValueChanged
+
+VBoxContainer {
+    size_flags_horizontal: .Fill
+
+    Label {
+        text: "── Inventory ──",
+        horizontal_alignment: .Center,
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    Label {
+        text: "Press \"Use\" to consume — qty decreases; at 0 the row is removed",
+        modulate: color(0.7, 0.7, 0.7, 1.0)
+    }
+
+    // each block form iterates $controller.inventory_items (NotifyList<InventoryItem>)
+    // := bindings on item.quantity re-evaluate when ValueChanged fires after UseItem()
+    each $controller.inventory_items { |idx, item|
+        HBoxContainer {
+            Label {
+                text := $"{idx + 1}.",
+                custom_minimum_size: vec2(24, 0)
+            }
+
+            Label {
+                text := item.display_name,
+                size_flags_horizontal: .Fill
+            }
+
+            Label {
+                text := $"x{item.quantity}",
+                custom_minimum_size: vec2(28, 0),
+                modulate := item.quantity > 1
+                            ? color(0.4, 1.0, 0.5, 1.0)
+                            : color(1.0, 0.6, 0.2, 1.0)
+            }
+
+            Button {
+                text: "Use",
+                disabled := item.quantity == 0,
+                #pressed: $controller.use_item(item.id)
+            }
+        }
+    }
+}

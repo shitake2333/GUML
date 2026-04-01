@@ -1,0 +1,128 @@
+// ============================================================
+// 13 - Internationalization / i18n  (tr, ntr, context)
+// Demo: tr(), ntr(), context disambiguation, template string combo
+// Locale data is loaded from res://i18n/{locale}.json
+// ============================================================
+
+VBoxContainer {
+    size_flags_horizontal: .Fill
+
+    // ── Locale switcher ─────────────────────────────────────
+    Label {
+        text: "── Switch Locale ──",
+        horizontal_alignment: .Center,
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    HBoxContainer {
+        Button {
+            text: "EN",
+            size_flags_horizontal: .ExpandFill,
+            modulate := $controller.current_locale == "en"
+                        ? color(0.3, 0.8, 0.3, 1.0)
+                        : color(1.0, 1.0, 1.0, 1.0),
+            #pressed: $controller.switch_to_en
+        }
+        Button {
+            text: "中文",
+            size_flags_horizontal: .ExpandFill,
+            modulate := $controller.current_locale == "zh_CN"
+                        ? color(0.3, 0.8, 0.3, 1.0)
+                        : color(1.0, 1.0, 1.0, 1.0),
+            #pressed: $controller.switch_to_zh
+        }
+        Button {
+            text: "日本語",
+            size_flags_horizontal: .ExpandFill,
+            modulate := $controller.current_locale == "ja"
+                        ? color(0.3, 0.8, 0.3, 1.0)
+                        : color(1.0, 1.0, 1.0, 1.0),
+            #pressed: $controller.switch_to_ja
+        }
+    }
+
+    Label {
+        text := $"Active locale: {$controller.current_locale}",
+        modulate: color(0.9, 0.9, 0.3, 1.0)
+    }
+
+    HSeparator {}
+
+    // ── §1 Simple tr() ──────────────────────────────────────
+    Label {
+        text: "── §1 Simple tr() ──",
+        horizontal_alignment: .Center
+    }
+    Label { text := tr("Hello World!") }
+
+    HSeparator {}
+
+    // ── §2 tr() with named args ─────────────────────────────
+    Label {
+        text: "── §2 tr() with args ──",
+        horizontal_alignment: .Center
+    }
+    HBoxContainer {
+        Label { text: "Name:", custom_minimum_size: vec2(52, 0) }
+        LineEdit {
+            size_flags_horizontal: .ExpandFill,
+            placeholder_text: "Enter name...",
+            text =: $controller.user_name
+        }
+    }
+    Label { text := tr("Hello, {name}!", { name: $controller.user_name }) }
+
+    HSeparator {}
+
+    // ── §3 Context disambiguation ───────────────────────────
+    Label {
+        text: "── §3 Context disambiguation ──",
+        horizontal_alignment: .Center
+    }
+    HBoxContainer {
+        Label {
+            text: "adjective: ",
+            custom_minimum_size: vec2(100, 0),
+            modulate: color(0.8, 0.8, 0.8, 1.0)
+        }
+        Label { text := tr("New", { context: "adjective" }) }
+    }
+    HBoxContainer {
+        Label {
+            text: "verb: ",
+            custom_minimum_size: vec2(100, 0),
+            modulate: color(0.8, 0.8, 0.8, 1.0)
+        }
+        Label { text := tr("New", { context: "verb" }) }
+    }
+
+    HSeparator {}
+
+    // ── §4 ntr() plural forms ───────────────────────────────
+    Label {
+        text: "── §4 ntr() plural ──",
+        horizontal_alignment: .Center
+    }
+    HBoxContainer {
+        Button { text: "−", custom_minimum_size: vec2(32, 0), #pressed: $controller.dec_count }
+        Label {
+            text := $"{$controller.item_count}",
+            custom_minimum_size: vec2(40, 0),
+            horizontal_alignment: .Center
+        }
+        Button { text: "+", custom_minimum_size: vec2(32, 0), #pressed: $controller.inc_count }
+    }
+    Label {
+        text := ntr("One item", "{count} items", $controller.item_count,
+                    { count: $controller.item_count })
+    }
+
+    HSeparator {}
+
+    // ── §5 Template string + tr() ───────────────────────────
+    Label {
+        text: "── §5 Template string + tr() ──",
+        horizontal_alignment: .Center
+    }
+    Label { text := $"[{tr("Role")}] {$controller.user_name}" }
+}

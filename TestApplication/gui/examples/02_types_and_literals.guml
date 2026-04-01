@@ -1,0 +1,90 @@
+// ============================================================
+// 02 - Types & Literals (§5)
+// Demo: primitives, enums, structs, resources, new-expression
+// ============================================================
+// string  int  float  boolean  null
+VBoxContainer {
+    size_flags_horizontal: .Fill
+
+    // --- §5.1.1 Primitive type literals ---
+    Label { text: "string: \"Hello World\"",  visible: true }
+    Label { text: "int:    custom_minimum_size vec2(200, 0)" }
+    Label { text: "bool:   visible: true,  disabled: false" }
+
+    // --- §5.1.2 Enum: leading dot, type inferred from property context ---
+    Label {
+        horizontal_alignment: .Center,
+        text: "enum: horizontal_alignment = .Center"
+    }
+
+    // --- §5.2 Struct mapping ---
+    // Positional form: type(arg1, arg2)
+    Control { custom_minimum_size: vec2(0, 2) }
+
+    // Struct as property value: modulate = color(r, g, b, a)
+    Label { text: "color(r, g, b, a) — see live demo below" }
+
+    // --- §6.4 new object-creation expression ---
+    Label {
+        label_settings: new LabelSettings { font_size: 13, font_color: color(0.9, 0.6, 0.2, 1.0) },
+        text: "new LabelSettings { font_size: 13, font_color: color(...) }"
+    }
+
+    // --- Live Demo: real-time RGB colour mixer ---
+    Label {
+        text: "―― Live Color Mixer ――",
+        horizontal_alignment: .Center,
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    // R channel slider
+    HBoxContainer {
+        Label { text: "R", custom_minimum_size: vec2(16, 0), modulate: color(1.0, 0.4, 0.4, 1.0) }
+        HSlider {
+            min_value: 0, max_value: 1, step: 0.01,
+            value: 0.9,
+            size_flags_horizontal: .Fill,
+            #value_changed: $controller.on_r_changed
+        }
+        Label { text := $"{$controller.r_val:.2f}", custom_minimum_size: vec2(36, 0) }
+    }
+
+    // G channel slider
+    HBoxContainer {
+        Label { text: "G", custom_minimum_size: vec2(16, 0), modulate: color(0.4, 1.0, 0.4, 1.0) }
+        HSlider {
+            min_value: 0, max_value: 1, step: 0.01,
+            value: 0.3,
+            size_flags_horizontal: .Fill,
+            #value_changed: $controller.on_g_changed
+        }
+        Label { text := $"{$controller.g_val:.2f}", custom_minimum_size: vec2(36, 0) }
+    }
+
+    // B channel slider
+    HBoxContainer {
+        Label { text: "B", custom_minimum_size: vec2(16, 0), modulate: color(0.4, 0.6, 1.0, 1.0) }
+        HSlider {
+            min_value: 0, max_value: 1, step: 0.01,
+            value: 0.3,
+            size_flags_horizontal: .Fill,
+            #value_changed: $controller.on_b_changed
+        }
+        Label { text := $"{$controller.b_val:.2f}", custom_minimum_size: vec2(36, 0) }
+    }
+
+    // Live color preview swatch
+    ColorRect {
+        custom_minimum_size: vec2(0, 80),
+        size_flags_horizontal: .Fill,
+        color := $controller.mixed_color
+    }
+
+    // Show the generated GUML expression live
+    Label {
+        text := $"color({$controller.r_val:.2f}, {$controller.g_val:.2f}, {$controller.b_val:.2f}, 1.0)",
+        horizontal_alignment: .Center,
+        modulate: color(0.7, 0.7, 0.7, 1.0)
+    }
+}
+

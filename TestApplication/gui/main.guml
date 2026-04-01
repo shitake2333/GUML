@@ -1,22 +1,74 @@
-import "panel/setting"
+// ============================================================
+// Main showcase shell
+// Left panel: section tabs + navigation list  |  Right panel: notebook viewer
+// ============================================================
+HSplitContainer {
+    /// Left navigation panel
+    @nav:PanelContainer {
+        custom_minimum_size: vec2(260, 0),
+        size_flags_vertical: .ExpandFill
 
-Panel {
-    size: vec2(640, 480),
-    theme_overrides: { 
-        panel: style_box_flat({
-            bg_color: color(0.4, 0.4, 0.4, 0.4)
-        })
-    },
-    @hello: Label {
-        position: vec2(10, 10),
-        size: vec2(200, 30),
-        text:= "hello " + $controller.SayHello
+        VBoxContainer {
+            size_flags_horizontal: .ExpandFill,
+            size_flags_vertical: .ExpandFill
+
+            // App title
+            Label {
+                text: "GUML Showcase",
+                vertical_alignment: .Center,
+                horizontal_alignment: .Center,
+                label_settings: new LabelSettings { font_size: 18 },
+                custom_minimum_size: vec2(0, 48)
+            }
+
+            // Section tab buttons
+            HBoxContainer {
+                Button {
+                    text: "Examples",
+                    size_flags_horizontal: .ExpandFill,
+                    modulate := $controller.active_section == "examples" ? color(0.3, 0.7, 1.0, 1.0) : color(1.0, 1.0, 1.0, 1.0),
+                    #pressed: $controller.show_examples
+                }
+                Button {
+                    text: "GUML Spec",
+                    size_flags_horizontal: .Expand,
+                    modulate := $controller.active_section == "spec" ? color(0.3, 0.7, 1.0, 1.0) : color(1.0, 1.0, 1.0, 1.0),
+                    #pressed: $controller.show_spec
+                }
+            }
+
+            // Separator
+            HSeparator {
+            }
+
+            // Navigation items (shared by both sections via nav_items)
+            ScrollContainer {
+                size_flags_horizontal: .ExpandFill,
+                size_flags_vertical: .ExpandFill
+
+                VBoxContainer {
+                    size_flags_horizontal: .ExpandFill
+
+                    each $controller.nav_items { |idx, item|
+                        Button {
+                            text := $"{item.key}. {item.title}",
+                            size_flags_horizontal: .ExpandFill,
+                            tooltip_text := item.description,
+                            modulate := $controller.selected_key == item.key ? color(0.3, 0.7, 1.0, 1.0) : color(1.0, 1.0, 1.0, 1.0),
+                            #pressed: $controller.select_item(item.key)
+                        }
+                    }
+                }
+            }
+        }
     }
-    
-    Button {
-        position: vec2(10, 50),
-        size: vec2(200, 30),
-        text: "Change world(" + @hello.Text + ")",
-        #pressed: "ChangeHelloBtnPressed"
+
+    // -------------------------------------------------------
+    // Right notebook area
+    // -------------------------------------------------------
+    @viewer:NotebookViewer {
+        size_flags_horizontal: .ExpandFill,
+        size_flags_vertical: .ExpandFill
     }
 }
+

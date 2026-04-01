@@ -1,4 +1,6 @@
 ﻿using Microsoft.CodeAnalysis;
+using GUML.Shared.Api.FrameworkPlugin;
+using GUML.SourceGenerator.FrameworkPlugin;
 
 namespace GUML.SourceGenerator;
 
@@ -11,63 +13,10 @@ internal sealed class CompilationApiScanner
 {
     private readonly Compilation _compilation;
     private readonly INamedTypeSymbol? _controlBaseType;
+    private readonly IFrameworkCastProvider _castProvider;
 
     // Cache: componentName -> INamedTypeSymbol
     private readonly Dictionary<string, INamedTypeSymbol?> _typeCache = new();
-
-    // ── Supported type sets (mirrors GUML.ApiGenerator.ApiModelBuilder) ──
-
-    private static readonly HashSet<string> PrimitiveClrTypeNames = new(StringComparer.Ordinal)
-    {
-        nameof(Boolean),
-        nameof(Int32),
-        nameof(Int64),
-        nameof(Single),
-        nameof(Double),
-        nameof(String)
-    };
-
-    private static readonly HashSet<string> GodotStructTypeNames = new(StringComparer.Ordinal)
-    {
-        "Vector2",
-        "Vector2I",
-        "Vector3",
-        "Vector3I",
-        "Vector4",
-        "Vector4I",
-        "Rect2",
-        "Rect2I",
-        "Transform2D",
-        "Transform3D",
-        "Color",
-        "Plane",
-        "Quaternion",
-        "Basis",
-        "Rid",
-        "Aabb",
-        "Projection",
-        "Margins"
-    };
-
-    private static readonly HashSet<string> GodotReferenceTypeFullNames = new(StringComparer.Ordinal)
-    {
-        "Godot.NodePath",
-        "Godot.StringName",
-        "Godot.Collections.Array",
-        "Godot.Collections.Dictionary"
-    };
-
-    private static readonly string[] GodotSupportedBaseTypes =
-    {
-        "Godot.Node",
-        "Godot.Resource",
-        "Godot.StyleBox",
-        "Godot.Theme",
-        "Godot.Font",
-        "Godot.FontFile",
-        "Godot.Texture",
-        "Godot.Texture2D"
-    };
 
     /// <summary>
     /// Creates a new scanner backed by the given Roslyn <see cref="Compilation"/>.
@@ -76,10 +25,16 @@ internal sealed class CompilationApiScanner
     /// <param name="compilation">
     /// The Roslyn Compilation containing all referenced assemblies (including GodotSharp).
     /// </param>
-    public CompilationApiScanner(Compilation compilation)
+    /// <param name="castProvider">
+    /// The framework cast provider used to generate property cast expressions.
+    /// Defaults to <see cref="GodotFrameworkPlugin.Instance"/> when not specified.
+    /// </param>
+    public CompilationApiScanner(Compilation compilation,
+        IFrameworkCastProvider? castProvider = null)
     {
         _compilation = compilation;
         _controlBaseType = compilation.GetTypeByMetadataName("Godot.Control");
+        _castProvider = castProvider ?? GodotFrameworkPlugin.Instance;
     }
 
     /// <summary>
@@ -114,10 +69,9 @@ internal sealed class CompilationApiScanner
         {
             foreach (var member in current.GetMembers(propertyName))
             {
-                if (member is IPropertySymbol prop && prop.DeclaredAccessibility == Accessibility.Public)
+                if (member is IPropertySymbol { DeclaredAccessibility: Accessibility.Public } prop)
                     return prop.Type;
-                if (member is IFieldSymbol field && field.DeclaredAccessibility == Accessibility.Public
-                    && !field.IsStatic && !field.IsConst)
+                if (member is IFieldSymbol { DeclaredAccessibility: Accessibility.Public, IsStatic: false, IsConst: false } field)
                     return field.Type;
             }
             current = current.BaseType;
@@ -138,10 +92,9 @@ internal sealed class CompilationApiScanner
         {
             foreach (var member in current.GetMembers(propertyName))
             {
-                if (member is IPropertySymbol prop && prop.DeclaredAccessibility == Accessibility.Public)
+                if (member is IPropertySymbol { DeclaredAccessibility: Accessibility.Public })
                     return true;
-                if (member is IFieldSymbol field && field.DeclaredAccessibility == Accessibility.Public &&
-                    !field.IsStatic && !field.IsConst)
+                if (member is IFieldSymbol { DeclaredAccessibility: Accessibility.Public, IsStatic: false, IsConst: false })
                     return true;
             }
             current = current.BaseType;
@@ -150,69 +103,91 @@ internal sealed class CompilationApiScanner
     }
 
     /// <summary>
+    /// Resolves the namespace of a component type by its simple name.
+    /// Returns <c>null</c> if the type cannot be found or is in the global namespace.
+    /// </summary>
+    /// <param name="componentName">The simple class name (e.g. "NotebookViewer").</param>
+    /// <returns>The fully-qualified namespace string, or <c>null</c>.</returns>
+    public string? ResolveComponentNamespace(string componentName)
+    {
+        var typeSymbol = ResolveComponentType(componentName);
+        if (typeSymbol?.ContainingNamespace is { IsGlobalNamespace: false } ns)
+            return ns.ToDisplayString();
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves the element type of a collection property on a given type.
+    /// Supports <c>IList{T}</c>, <c>IEnumerable{T}</c>, <c>ObservableCollection{T}</c>, and array types.
+    /// </summary>
+    /// <param name="typeName">The class name containing the collection property.</param>
+    /// <param name="propertyName">The PascalCase collection property name.</param>
+    /// <returns>Fully qualified element type name, or <c>null</c> if unresolvable.</returns>
+    public string? ResolveCollectionElementType(string typeName, string propertyName)
+    {
+        var propType = ResolvePropertyType(typeName, propertyName);
+        if (propType == null) return null;
+
+        // Array type: T[]
+        if (propType is IArrayTypeSymbol arrayType)
+            return arrayType.ElementType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+        // Generic type: IList<T>, ObservableCollection<T>, etc.
+        if (propType is INamedTypeSymbol namedType)
+        {
+            // Direct generic arguments
+            if (namedType.IsGenericType && namedType.TypeArguments.Length > 0)
+                return namedType.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+            // Walk interfaces for IEnumerable<T>
+            foreach (var iface in namedType.AllInterfaces)
+            {
+                if (iface.IsGenericType &&
+                    iface.OriginalDefinition.ToDisplayString() == "System.Collections.Generic.IEnumerable<T>" &&
+                    iface.TypeArguments.Length > 0)
+                {
+                    return iface.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Maps an <see cref="ITypeSymbol"/> to a C# cast/conversion expression string
     /// for use in zero-reflection setter code generation.
+    /// Delegates to the configured <see cref="IFrameworkCastProvider"/> after extracting
+    /// the type metadata from the symbol.
     /// </summary>
     /// <param name="typeSymbol">The resolved property type symbol.</param>
     /// <returns>
     /// A cast expression string like <c>"(string)"</c>, <c>"Convert.ToSingle"</c>, etc.,
     /// or <c>null</c> when the type is unknown (triggers reflection fallback).
     /// </returns>
-    internal static string? GetCastExpression(ITypeSymbol typeSymbol)
+    internal string? GetCastExpression(ITypeSymbol typeSymbol)
     {
-        switch (typeSymbol.SpecialType)
+        string fullyQualifiedTypeName = typeSymbol.ToDisplayString(
+            SymbolDisplayFormat.FullyQualifiedFormat);
+
+        bool isEnum = typeSymbol.TypeKind == TypeKind.Enum;
+        bool isValueType = typeSymbol.IsValueType;
+
+        // Collect base type fully-qualified names (without global:: prefix)
+        var baseTypeFullNames = new List<string>();
+        var current = typeSymbol.BaseType;
+        while (current != null && current.SpecialType != SpecialType.System_Object)
         {
-            case SpecialType.System_String:
-                return "Convert.ToString";
-            case SpecialType.System_Boolean:
-                return "Convert.ToBoolean";
-            case SpecialType.System_Int32:
-                return "Convert.ToInt32";
-            case SpecialType.System_Int64:
-                return "Convert.ToInt64";
-            case SpecialType.System_Single:
-                // Use Convert.ToSingle instead of (float) cast because boxed double
-                // cannot be directly unboxed to float — would throw InvalidCastException.
-                return "Convert.ToSingle";
-            case SpecialType.System_Double:
-                return "Convert.ToDouble";
+            string ns = current.ContainingNamespace?.ToDisplayString() ?? string.Empty;
+            string baseFull = string.IsNullOrEmpty(ns)
+                ? current.Name
+                : ns + "." + current.Name;
+            baseTypeFullNames.Add(baseFull);
+            current = current.BaseType;
         }
 
-        if (typeSymbol.TypeKind == TypeKind.Enum)
-        {
-            string fullName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            return $"({fullName})";
-        }
-
-        // Godot struct types (Vector2, Color, etc.)
-        if (typeSymbol.IsValueType && GodotStructTypeNames.Contains(typeSymbol.Name))
-        {
-            return $"({typeSymbol.Name})";
-        }
-
-        // Godot reference types (NodePath, StringName, etc.)
-        string typeFullName = typeSymbol.ContainingNamespace?.ToDisplayString() + "." + typeSymbol.Name;
-        if (GodotReferenceTypeFullNames.Contains(typeFullName))
-        {
-            return $"({typeSymbol.Name})";
-        }
-
-        // Godot node/resource types (check inheritance)
-        foreach (string supportedBase in GodotSupportedBaseTypes)
-        {
-            var baseType = typeSymbol;
-            while (baseType != null)
-            {
-                string baseFull = baseType.ContainingNamespace?.ToDisplayString() + "." + baseType.Name;
-                if (baseFull == supportedBase)
-                {
-                    return $"({typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)})";
-                }
-                baseType = baseType.BaseType;
-            }
-        }
-
-        return null;
+        return _castProvider.GetCastExpression(fullyQualifiedTypeName, isEnum, isValueType,
+            baseTypeFullNames);
     }
 
     // ── Private helpers ──

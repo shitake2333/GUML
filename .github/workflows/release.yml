@@ -1,0 +1,54 @@
+name: Release NuGet Packages
+
+on:
+  release:
+    types: [ published ]
+
+jobs:
+  publish:
+    name: Pack & Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore GUML.CI.slnf
+
+      - name: Build
+        run: dotnet build GUML.CI.slnf --no-restore -c Release
+
+      - name: Test
+        run: dotnet test GUML.CI.slnf --no-build -c Release
+
+      - name: Pack
+        run: |
+          dotnet pack GUML.Shared/GUML.Shared.csproj -c Release -o artifacts --no-build
+          dotnet pack GUML/GUML.csproj -c Release -o artifacts --no-build
+          dotnet pack GUML.SourceGenerator/GUML.SourceGenerator.csproj -c Release -o artifacts --no-build
+          dotnet pack GUML.Analyzer/GUML.Analyzer.csproj -c Release -o artifacts --no-build
+          dotnet pack RegexTokenizeGenerator/RegexTokenizeGenerator.csproj -c Release -o artifacts --no-build
+
+      - name: Push to NuGet.org
+        run: |
+          for pkg in artifacts/*.nupkg; do
+            dotnet nuget push "$pkg" \
+              --api-key ${{ secrets.NUGET_API_KEY }} \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
+
+      - name: Upload packages to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.event.release.tag_name }} artifacts/*.nupkg artifacts/*.snupkg --clobber

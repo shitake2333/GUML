@@ -1,0 +1,14 @@
+Control {
+    param vec2 size,
+    param vec2 position,
+    param INotifyListChanged[] actors
+    param Node item_template
+
+    ListView {
+        position: $root.position,
+        size: $root.size,
+        items: $root.actors,
+
+        each $root.actors => $root.item_template
+    }
+}

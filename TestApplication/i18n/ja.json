@@ -1,0 +1,9 @@
+{
+    "Hello World!": "こんにちは、世界！",
+    "Hello, {name}!": "こんにちは、{name}さん！",
+    "adjective|New": "新しい",
+    "verb|New": "新規作成",
+    "One item": "1件",
+    "{count} items": "{count}件",
+    "Role": "役割"
+}

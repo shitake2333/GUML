@@ -1,28 +1,53 @@
-﻿namespace GUML.SourceGenerator;
+﻿using GUML.Shared.Api.FrameworkPlugin;
+using GUML.Shared.Converter;
+using GUML.Shared.Syntax;
+using GUML.Shared.Syntax.Nodes;
+using GUML.Shared.Syntax.Nodes.Expressions;
+using GUML.SourceGenerator.FrameworkPlugin;
+
+namespace GUML.SourceGenerator;
+
 /// <summary>
 /// Delegate to resolve imported Guml documents.
 /// </summary>
-public delegate GumlDoc? ImportResolver(string path);
+public delegate GumlDocumentSyntax? ImportResolver(string path);
 
 /// <summary>
-/// Holds information about a named alias node declared via @name syntax in .guml.
-/// </summary>
-internal readonly struct AliasInfo(string aliasKey, string propertyName)
-{
-    /// <summary>The original alias key (e.g., "@hello").</summary>
-    public string AliasKey { get; } = aliasKey;
-
-    /// <summary>The PascalCase property name (e.g., "Hello").</summary>
-    public string PropertyName { get; } = propertyName;
-}
-
-/// <summary>
-/// Transforms a parsed <see cref="GumlDoc"/> AST into a C# source code string
+/// Transforms a parsed <see cref="GumlDocumentSyntax"/> CST into a C# source code string
 /// representing a strongly-typed view class.
 /// Each call to <see cref="Emit"/> creates a fresh instance to ensure thread-safety.
 /// </summary>
 internal sealed class GumlCodeEmitter
 {
+    /// <summary>
+    /// Maps GUML type names to their C# equivalents.
+    /// </summary>
+    private static readonly Dictionary<string, string> s_gumlTypeToCSharp = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["boolean"] = "bool",
+        ["integer"] = "int",
+        ["number"] = "double",
+    };
+
+    /// <summary>
+    /// Ensures <paramref name="name"/> is a valid C# identifier.
+    /// Leading digit characters are prefixed with <c>_</c> rather than stripped,
+    /// so that "1button" becomes "_1button" instead of silently losing the digit.
+    /// </summary>
+    internal static string SanitizeIdentifier(string name)
+    {
+        if (name.Length > 0 && char.IsDigit(name[0]))
+            return "_" + name;
+        return name.Length > 0 ? name : "_";
+    }
+
+    /// <summary>
+    /// Maps a GUML type name to its C# equivalent, or returns it unchanged.
+    /// </summary>
+    internal static string MapGumlType(string typeName)
+    {
+        return s_gumlTypeToCSharp.TryGetValue(typeName, out string? mapped) ? mapped : typeName;
+    }
     private int _varCounter;
     private int _bindingCounter;
     private int _eachCounter;
@@ -30,91 +55,103 @@ internal sealed class GumlCodeEmitter
 
     /// <summary>
     /// Tracks each-loop scope variable names for nested each code generation.
-    /// Each entry maps loop variable names (IndexName, ValueName) to the C# scope variable
-    /// (e.g., "__scope_0") so that <see cref="BuildRefChain"/> can emit
-    /// <c>__scope_N.Lookup("varName")</c> instead of a bare variable reference.
+    /// Includes the resolved element type name for typed code generation.
     /// </summary>
-    private readonly Stack<(string ScopeVar, HashSet<string> VarNames)> _eachScopeStack = new();
+    private readonly Stack<(string ScopeVar, string IndexName, string ValueName, string? ElementTypeName)> _eachScopeStack = new();
 
     /// <summary>Maps alias key ("@hello") to PascalCase property name ("Hello").</summary>
-    private readonly Dictionary<string, string> _aliasMap = new Dictionary<string, string>();
+    private readonly Dictionary<string, string> _aliasMap = new();
 
-    /// <summary>Reverse map from GumlSyntaxNode instance to alias info, for assignment generation.</summary>
-    private readonly Dictionary<GumlSyntaxNode, AliasInfo> _nodeAliasMap = new Dictionary<GumlSyntaxNode, AliasInfo>();
+    /// <summary>Reverse map from ComponentDeclarationSyntax to alias info (key, PascalCase property name).</summary>
+    private readonly Dictionary<ComponentDeclarationSyntax, (string AliasKey, string PropertyName)> _nodeAliasMap = new();
 
-    /// <summary>Whether a controller type name is explicitly provided (enables controller alias assignment).</summary>
+    /// <summary>Whether a controller type name is explicitly provided.</summary>
     private bool _hasControllerTypeName;
 
     private CompilationApiScanner? _scanner;
     private string? _activeControllerTypeName;
-    private GumlDoc? _currentDoc;
+    private GumlDocumentSyntax? _currentDoc;
     private ImportResolver? _importResolver;
+
+    // Framework plugin fields — default to Godot adapter for backward compatibility.
+    private readonly IFrameworkTypeProvider _typeProvider = GodotFrameworkPlugin.Instance;
+    private readonly IFrameworkEventProvider _eventProvider = GodotFrameworkPlugin.Instance;
+    private readonly IFrameworkPseudoPropProvider _pseudoPropProvider = GodotFrameworkPlugin.Instance;
 
     /// <summary>
     /// Emits C# source code for the given GUML document.
     /// </summary>
-    /// <param name="filePath">The original .guml file path (used to derive class name).</param>
-    /// <param name="doc">The parsed GUML document AST.</param>
-    /// <param name="additionalNamespaces">
-    /// Additional namespaces to include as <c>using</c> directives in the generated code.
-    /// This corresponds to the runtime <c>Guml.ControllerNamespaces</c> list and ensures that
-    /// user-defined GUI component types can be resolved at compile time.
-    /// </param>
-    /// <param name="scanner">
-    /// Optional <see cref="CompilationApiScanner"/> for resolving property types at compile time.
-    /// When provided and the property type is resolved, the emitter generates a direct setter
-    /// delegate (zero-reflection path). When <c>null</c> or the type cannot be resolved, the
-    /// emitter falls back to the string property name constructor (reflection path).
-    /// </param>
-    /// <param name="controllerTypeName">
-    /// When provided, overrides the controller type name derived from the file name.
-    /// Used by the [GumlController]-driven pipeline to supply the exact controller type.
-    /// </param>
-    /// <param name="gumlRegistryKey">
-    /// When provided, generates a [ModuleInitializer] Register() method that registers
-    /// this view's factory into Guml.ViewRegistry with this key.
-    /// </param>
-    /// <param name="importResolver">
-    /// Optional delegate to resolve imported Guml documents for strict parameter checking.
-    /// </param>
-    /// <returns>Complete C# source code string for the generated view class.</returns>
-    public static string Emit(string filePath, GumlDoc doc, IReadOnlyList<string>? additionalNamespaces = null,
-        CompilationApiScanner? scanner = null, string? controllerTypeName = null, string? gumlRegistryKey = null,
-        ImportResolver? importResolver = null)
+    internal static string Emit(string filePath, GumlDocumentSyntax doc,
+        IReadOnlyList<string>? additionalNamespaces = null,
+        CompilationApiScanner? scanner = null, string? controllerTypeName = null,
+        string? gumlRegistryKey = null, ImportResolver? importResolver = null)
     {
-        var emitter = new GumlCodeEmitter();
-        emitter._scanner = scanner;
-        emitter._importResolver = importResolver;
-        return emitter.EmitInternal(filePath, doc, additionalNamespaces ?? Array.Empty<string>(),
+        var emitter = new GumlCodeEmitter
+        {
+            _scanner = scanner,
+            _importResolver = importResolver
+        };
+        return emitter.EmitInternal(filePath, doc,
+            additionalNamespaces ?? Array.Empty<string>(),
             scanner, controllerTypeName, gumlRegistryKey);
     }
 
     /// <summary>
     /// Generates a partial class for the controller with strongly-typed
-    /// named node properties derived from @alias declarations and import controller
-    /// properties derived from import declarations in the .guml file.
-    /// Properties that already exist on the controller class (user-defined) are skipped.
+    /// named node properties, import controller properties, parameter properties, and events.
     /// </summary>
-    /// <param name="controllerTypeName">Simple type name of the controller class.</param>
-    /// <param name="controllerNamespace">Namespace of the controller class, or null for global.</param>
-    /// <param name="doc">The parsed GUML document containing alias and import declarations.</param>
-    /// <param name="existingMembers">Set of member names already defined on the controller class. May be null.</param>
-    /// <returns>C# source code for the controller partial class, or null if nothing to generate.</returns>
-    public static string? EmitControllerPartial(string controllerTypeName, string? controllerNamespace, GumlDoc doc,
-        ISet<string>? existingMembers = null)
+    /// <param name="controllerTypeName">The simple name of the controller class.</param>
+    /// <param name="controllerNamespace">The namespace of the controller class, or null.</param>
+    /// <param name="doc">The parsed GUML document.</param>
+    /// <param name="existingMembers">Members already declared on the controller type.</param>
+    /// <param name="typeProvider">Optional framework type provider for namespace usings. Defaults to Godot.</param>
+    /// <param name="additionalNamespaces">Optional extra namespaces to inject as using directives.</param>
+    internal static string? EmitControllerPartial(string controllerTypeName,
+        string? controllerNamespace, GumlDocumentSyntax doc,
+        ISet<string>? existingMembers = null,
+        IFrameworkTypeProvider? typeProvider = null,
+        IReadOnlyList<string>? additionalNamespaces = null)
     {
-        if (doc.LocalAlias.Count == 0 && doc.Imports.Count == 0 && doc.RootNode.ParameterNodes.Count == 0 && doc.RootNode.EventNodes.Count == 0)
-        {
+        typeProvider ??= GodotFrameworkPlugin.Instance;
+
+        var root = doc.RootComponent;
+        var aliases = CollectAliases(root);
+        var parameters = GetParameters(root).ToList();
+        var events = GetEvents(root).ToList();
+
+        if (aliases.Count == 0 && parameters.Count == 0 && events.Count == 0)
             return null;
-        }
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("// This file was generated by GUML.SourceGenerator. Do not edit manually.");
         sb.AppendLine();
-        sb.AppendLine("using Godot;");
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine();
+        var emittedNamespaces = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string ns in typeProvider.GetRequiredUsings())
+        {
+            sb.AppendLine($"using {ns};");
+            emittedNamespaces.Add(ns);
+        }
         sb.AppendLine("using GUML;");
+        emittedNamespaces.Add("GUML");
         sb.AppendLine("using System;");
+        emittedNamespaces.Add("System");
+        sb.AppendLine("using System.Collections;");
+        emittedNamespaces.Add("System.Collections");
+        sb.AppendLine("using System.Collections.Generic;");
+        emittedNamespaces.Add("System.Collections.Generic");
+
+        if (additionalNamespaces != null)
+        {
+            foreach (string ns in additionalNamespaces)
+            {
+                if (!string.IsNullOrWhiteSpace(ns) && emittedNamespaces.Add(ns.Trim()))
+                    sb.AppendLine($"using {ns.Trim()};");
+            }
+        }
+
         sb.AppendLine();
 
         bool hasNamespace = !string.IsNullOrEmpty(controllerNamespace);
@@ -133,84 +170,58 @@ internal sealed class GumlCodeEmitter
         sb.AppendLine($"{indent}{{");
 
         bool anyGenerated = false;
+        var generatedNames = new HashSet<string>();
 
         // Generate named node properties from @alias declarations
-        foreach (var kvp in doc.LocalAlias)
+        foreach (var kvp in aliases)
         {
-            string? aliasKey = kvp.Key;
-            var node = kvp.Value;
+            string aliasKey = kvp.Key;
+            var comp = kvp.Value;
             string propName = KeyConverter.ToPascalCase(aliasKey.TrimStart('@'));
 
-            if (existingMembers != null && existingMembers.Contains(propName))
+            if ((existingMembers != null && existingMembers.Contains(propName)) || !generatedNames.Add(propName))
                 continue;
 
-            // Determine type: check if node.Name matches an import
-            string propType = node.Name;
+            string propType = comp.TypeName.Text;
+            // Check if this type matches an import
             foreach (var import in doc.Imports)
             {
-                 // Robust path parsing
-                 string fileName = import.Key.Replace('\\', '/').TrimEnd('/');
-                 int lastSlash = fileName.LastIndexOf('/');
-                 if (lastSlash >= 0) fileName = fileName.Substring(lastSlash + 1);
-                 if (fileName.EndsWith(".guml", StringComparison.OrdinalIgnoreCase))
-                     fileName = fileName.Substring(0, fileName.Length - 5);
+                string importFileName = GetImportFileName(import);
+                string nameInGuml = import.Alias != null
+                    ? import.Alias.Name.Text
+                    : KeyConverter.ToPascalCase(importFileName);
 
-                 string nameInGuml = import.Value.Alias ?? KeyConverter.ToPascalCase(fileName);
-
-                 if (nameInGuml == node.Name)
-                 {
-                     // Use the Controller type for imported components
-                     propType = KeyConverter.ToPascalCase(fileName) + "Controller";
-                     break;
-                 }
+                if (nameInGuml == propType)
+                {
+                    propType = KeyConverter.ToPascalCase(importFileName) + "Controller";
+                    break;
+                }
             }
 
-            sb.AppendLine($"    /// <summary>");
-            sb.AppendLine($"    /// Alias reference '{kvp.Key}' pointing to a {node.Name} node.");
-            sb.AppendLine($"    /// </summary>");
-            sb.AppendLine($"    public {propType} {propName} {{ get; internal set; }}");
-            sb.AppendLine();
-        }
-
-        // Generate import controller properties from import declarations
-        foreach (var import in doc.Imports)
-        {
-            string importKey = import.Key; // e.g., "panel/setting"
-            string importFileName = importKey.Contains("/")
-                ? importKey.Substring(importKey.LastIndexOf('/') + 1)
-                : importKey;
-            string importControllerTypeName = KeyConverter.ToPascalCase(importFileName) + "Controller";
-
-            if (existingMembers != null && existingMembers.Contains(importControllerTypeName))
-                continue;
-
-            sb.AppendLine($"{indent}    /// <summary>Import controller for '{importKey}.guml', auto-generated from import declaration.</summary>");
-            sb.AppendLine($"{indent}    public {importControllerTypeName} {importControllerTypeName} {{ get; set; }}");
+            sb.AppendLine($"{indent}    /// <summary>Named node '{aliasKey}' pointing to a {comp.TypeName.Text} node.</summary>");
+            sb.AppendLine($"{indent}    public {propType} {propName} {{ get; internal set; }} = null!;");
             sb.AppendLine();
             anyGenerated = true;
         }
 
-        // Generate Parameter Properties (param Type Name: DefaultValue)
-        foreach (var param in doc.RootNode.ParameterNodes)
+        // Generate Parameter Properties
+        foreach (var param in parameters)
         {
-            string propName = KeyConverter.ToPascalCase(param.ParameterName);
-            string typeName = param.TypeName;
-            if (typeName == "string") typeName = "string"; // normalize? generic types?
+            string propName = KeyConverter.ToPascalCase(param.Name.Text);
+            string typeName = MapGumlType(param.TypeName.Text);
 
-            if (existingMembers != null && existingMembers.Contains(propName))
+            if ((existingMembers != null && existingMembers.Contains(propName)) || !generatedNames.Add(propName))
                 continue;
 
-            string defaultVal = "";
+            string defaultVal = " = default!";
             if (param.DefaultValue != null)
             {
-                // We'll create a temporary emitter instance to emit expression string
                 var tempEmitter = new GumlCodeEmitter();
                 defaultVal = " = " + tempEmitter.EmitExpression(param.DefaultValue);
             }
 
             sb.AppendLine($"{indent}    private {typeName} _{propName}{defaultVal};");
-            sb.AppendLine($"{indent}    /// <summary>Parameter property '{param.ParameterName}'.</summary>");
-            sb.AppendLine($"{indent}    [GumlParameter]");
+            sb.AppendLine($"{indent}    /// <summary>Parameter property '{param.Name.Text}'.</summary>");
             sb.AppendLine($"{indent}    public {typeName} {propName}");
             sb.AppendLine($"{indent}    {{");
             sb.AppendLine($"{indent}        get => _{propName};");
@@ -227,99 +238,116 @@ internal sealed class GumlCodeEmitter
             anyGenerated = true;
         }
 
-        // Generate Events (event Name(Type arg...))
-        foreach (var evt in doc.RootNode.EventNodes)
+        // Generate Events
+        foreach (var evt in events)
         {
-             string evtName = KeyConverter.ToPascalCase(evt.EventName);
+            string evtName = KeyConverter.ToPascalCase(evt.Name.Text);
 
-             if (existingMembers != null && existingMembers.Contains(evtName))
+            if (existingMembers != null && existingMembers.Contains(evtName))
                 continue;
 
-             string delegateType;
-             if (evt.Arguments.Count == 0)
-             {
-                 delegateType = "Action";
-             }
-             else
-             {
-                 var typeList = string.Join(", ", evt.Arguments.Select(a => a.Type));
-                 delegateType = $"Action<{typeList}>";
-             }
+            var args = evt.Arguments != null ? AsList(evt.Arguments) : new List<EventArgumentSyntax>();
 
-             sb.AppendLine($"{indent}    /// <summary>Event '{evt.EventName}'.</summary>");
-             sb.AppendLine($"{indent}    public event {delegateType}? {evtName};");
+            string delegateType;
+            if (args.Count == 0)
+            {
+                delegateType = "Action";
+            }
+            else
+            {
+                string typeList = string.Join(", ", args.Select(a => MapGumlType(a.TypeName.Text)));
+                delegateType = $"Action<{typeList}>";
+            }
 
-             // Raise method
-             var argsDecl = string.Join(", ", evt.Arguments.Select((a, i) => $"{a.Type} arg{i}"));
-             var argsCall = string.Join(", ", evt.Arguments.Select((_, i) => $"arg{i}"));
+            sb.AppendLine($"{indent}    /// <summary>Event '{evt.Name.Text}'.</summary>");
+            sb.AppendLine($"{indent}    public event {delegateType}? {evtName};");
 
-             sb.AppendLine($"{indent}    internal void Raise{evtName}({argsDecl}) => {evtName}?.Invoke({argsCall});");
-             sb.AppendLine();
-             anyGenerated = true;
+            string argsDecl = string.Join(", ", args.Select((a, i) => $"{MapGumlType(a.TypeName.Text)} arg{i}"));
+            string argsCall = string.Join(", ", args.Select((_, i) => $"arg{i}"));
+
+            sb.AppendLine($"{indent}    internal void Raise{evtName}({argsDecl}) => {evtName}?.Invoke({argsCall});");
+            sb.AppendLine();
+            anyGenerated = true;
         }
 
         sb.AppendLine($"{indent}}}");
 
-        // If all properties were skipped (already exist), return null
         if (!anyGenerated)
-        {
             return null;
-        }
 
         return sb.ToString();
     }
 
-    private string EmitInternal(string filePath, GumlDoc doc, IReadOnlyList<string> additionalNamespaces,
+    private string EmitInternal(string filePath, GumlDocumentSyntax doc,
+        IReadOnlyList<string> additionalNamespaces,
         CompilationApiScanner? scanner, string? controllerTypeName, string? gumlRegistryKey)
     {
-        // 1. Determine class names
         string fileName = Path.GetFileNameWithoutExtension(filePath);
-        string className = KeyConverter.ToPascalCase(fileName) + "GumlView";
-        string controllerName = controllerTypeName ?? (KeyConverter.ToPascalCase(fileName) + "Controller");
+        string className = SanitizeIdentifier(KeyConverter.ToPascalCase(fileName)) + "GumlView";
+        string controllerName = controllerTypeName ?? (SanitizeIdentifier(KeyConverter.ToPascalCase(fileName)) + "Controller");
         _activeControllerTypeName = controllerName;
-
         _hasControllerTypeName = !string.IsNullOrEmpty(controllerTypeName);
         _currentDoc = doc;
 
-        // Collect alias names from the doc and build reverse map
-        foreach (var kvp in doc.LocalAlias)
+        // Collect aliases
+        var aliases = CollectAliases(doc.RootComponent);
+        foreach (var kvp in aliases)
         {
             string aliasVarName = KeyConverter.ToPascalCase(kvp.Key.TrimStart('@'));
             _aliasMap[kvp.Key] = aliasVarName;
-            _nodeAliasMap[kvp.Value] = new AliasInfo(kvp.Key, aliasVarName);
+            _nodeAliasMap[kvp.Value] = (kvp.Key, aliasVarName);
         }
 
         var bodyBuilder = new StringBuilder();
-        string rootVarName = EmitNode(bodyBuilder, doc.RootNode, null, "        ", scanner);
+        string rootVarName = EmitNode(bodyBuilder, doc.RootComponent, null, "        ", scanner);
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("// This file was generated by GUML.SourceGenerator. Do not edit manually.");
         sb.AppendLine();
-        sb.AppendLine("using Godot;");
+        var emittedNamespaces = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string ns in _typeProvider.GetRequiredUsings())
+        {
+            sb.AppendLine($"using {ns};");
+            emittedNamespaces.Add(ns);
+        }
         sb.AppendLine("using GUML;");
+        emittedNamespaces.Add("GUML");
+        sb.AppendLine("using GUML.Binding;");
+        emittedNamespaces.Add("GUML.Binding");
         sb.AppendLine("using System;");
+        emittedNamespaces.Add("System");
         sb.AppendLine("using System.Collections.Generic;");
+        emittedNamespaces.Add("System.Collections.Generic");
 
-        // Additional namespaces from GumlNamespaces MSBuild property
-        // (compile-time equivalent of Guml.ControllerNamespaces)
         foreach (string? ns in additionalNamespaces)
         {
-            if (!string.IsNullOrWhiteSpace(ns))
-            {
+            if (!string.IsNullOrWhiteSpace(ns) && emittedNamespaces.Add(ns.Trim()))
                 sb.AppendLine($"using {ns.Trim()};");
+        }
+
+        // Auto-inject namespaces for custom component types found by the scanner
+        if (scanner != null)
+        {
+            var componentNamespaces = new HashSet<string>();
+            CollectComponentNamespaces(doc.RootComponent, doc, scanner, componentNamespaces);
+            foreach (string ns in componentNamespaces)
+            {
+                if (emittedNamespaces.Add(ns))
+                    sb.AppendLine($"using {ns};");
             }
         }
 
         sb.AppendLine();
 
-        // Generate import comments
+        // Import comments
         if (doc.Imports.Count > 0)
         {
             sb.AppendLine("// GUML Imports (require runtime resolution):");
             foreach (var import in doc.Imports)
             {
-                sb.AppendLine($"//   {(import.Value.IsTopLevel ? "import_top" : "import")} \"{import.Key}\"");
+                string importPath = StripQuotes(import.Path.Text);
+                sb.AppendLine($"//   import \"{importPath}\"");
             }
             sb.AppendLine();
         }
@@ -330,41 +358,34 @@ internal sealed class GumlCodeEmitter
         sb.AppendLine($"public partial class {className}");
         sb.AppendLine("{");
 
-        // Controller field
         sb.AppendLine($"    private {controllerName} _controller;");
-        sb.AppendLine($"    private BindingScope _rootScope;");
-        sb.AppendLine($"    internal BindingScope RootScope => _rootScope;");
+        sb.AppendLine("    private BindingScope _rootScope;");
+        sb.AppendLine("    internal BindingScope RootScope => _rootScope;");
         sb.AppendLine();
 
-        // Alias properties
+        // Alias properties on the view class
         foreach (var kvp in _aliasMap)
         {
-            var node = doc.LocalAlias[kvp.Key];
+            var comp = aliases[kvp.Key];
+            string propType = comp.TypeName.Text;
 
-            // Determine type: check if node.Name matches an import
-            string propType = node.Name;
             foreach (var import in doc.Imports)
             {
-                 // Robust path parsing
-                 string importFileName = import.Key.Replace('\\', '/').TrimEnd('/');
-                 int lastSlash = importFileName.LastIndexOf('/');
-                 if (lastSlash >= 0) importFileName = importFileName.Substring(lastSlash + 1);
-                 if (importFileName.EndsWith(".guml", StringComparison.OrdinalIgnoreCase))
-                     importFileName = importFileName.Substring(0, importFileName.Length - 5);
+                string importFileName = GetImportFileName(import);
+                string nameInGuml = import.Alias != null
+                    ? import.Alias.Name.Text
+                    : KeyConverter.ToPascalCase(importFileName);
 
-                 string nameInGuml = import.Value.Alias ?? KeyConverter.ToPascalCase(importFileName);
-
-                 if (nameInGuml == node.Name)
-                 {
-                     // Use the Controller type for imported components
-                     propType = KeyConverter.ToPascalCase(importFileName) + "Controller";
-                     break;
-                 }
+                if (nameInGuml == comp.TypeName.Text)
+                {
+                    propType = KeyConverter.ToPascalCase(importFileName) + "Controller";
+                    break;
+                }
             }
 
-            sb.AppendLine($"    /// <summary>");
-            sb.AppendLine($"    /// Alias reference '{kvp.Key}' pointing to a {node.Name} node.");
-            sb.AppendLine($"    /// </summary>");
+            sb.AppendLine("    /// <summary>");
+            sb.AppendLine($"    /// Alias reference '{kvp.Key}' pointing to a {comp.TypeName.Text} node.");
+            sb.AppendLine("    /// </summary>");
             sb.AppendLine($"    public {propType} {kvp.Value} {{ get; private set; }}");
             sb.AppendLine();
         }
@@ -373,8 +394,6 @@ internal sealed class GumlCodeEmitter
         sb.AppendLine("    /// <summary>");
         sb.AppendLine("    /// Builds the UI tree from the GUML definition.");
         sb.AppendLine("    /// </summary>");
-        sb.AppendLine($"    /// <param name=\"controller\">The controller instance to bind to.</param>");
-        sb.AppendLine("    /// <returns>The root control node of the UI tree.</returns>");
         sb.AppendLine($"    public Control Build({controllerName} controller)");
         sb.AppendLine("    {");
         sb.AppendLine("        _controller = controller;");
@@ -385,61 +404,21 @@ internal sealed class GumlCodeEmitter
         sb.AppendLine($"        return {rootVarName};");
         sb.AppendLine("    }");
 
-        // Generate [ModuleInitializer] Register() method when registry key is provided
+        // Generate [ModuleInitializer] Register()
         if (!string.IsNullOrEmpty(gumlRegistryKey))
         {
             sb.AppendLine();
             sb.AppendLine("    /// <summary>");
             sb.AppendLine("    /// Registers this view's factory into the GUML runtime registry.");
-            sb.AppendLine("    /// Called automatically via module initializer.");
             sb.AppendLine("    /// </summary>");
             sb.AppendLine("    [System.Runtime.CompilerServices.ModuleInitializer]");
             sb.AppendLine("    internal static void Register()");
             sb.AppendLine("    {");
-            sb.AppendLine($"        Guml.ViewRegistry[\"{EscapeString(gumlRegistryKey!)}\"] = (root) =>");
+            sb.AppendLine($"        Guml.ControllerRegistry[typeof({controllerName})] = (root) =>");
             sb.AppendLine("        {");
             sb.AppendLine($"            var ctrl = new {controllerName}();");
             sb.AppendLine($"            var view = new {className}();");
             sb.AppendLine("            var rootNode = view.Build(ctrl);");
-
-            // Emit import resolution code
-            if (doc.Imports.Count > 0)
-            {
-                // Compute the directory of the current .guml file relative to the project
-                string gumlDir = Path.GetDirectoryName(gumlRegistryKey!)?.Replace('\\', '/') ?? "";
-                if (gumlDir.Length > 0 && !gumlDir.EndsWith("/"))
-                {
-                    gumlDir += "/";
-                }
-
-                sb.AppendLine();
-                sb.AppendLine("            // Resolve imports");
-                foreach (var import in doc.Imports)
-                {
-                    string importKey = import.Key;   // e.g., "panel/setting" or "../components/MyButton"
-                    bool isTop = import.Value.IsTopLevel;
-
-                    // Resolve relative path segments (..)
-                    string importGumlPath = ResolveRelativePath($"{gumlDir}{importKey}.guml");
-
-                    // Derive controller property name: "panel/setting" → file name "setting" → PascalCase "Setting" → "SettingController"
-                    string importFileName = importKey.Replace('\\', '/').TrimEnd('/');
-                    int lastSlash = importFileName.LastIndexOf('/');
-                    if (lastSlash >= 0) importFileName = importFileName.Substring(lastSlash + 1);
-
-                    string importControllerTypeName = KeyConverter.ToPascalCase(importFileName) + "Controller";
-
-                    if (isTop)
-                    {
-                        sb.AppendLine($"            var import_{importControllerTypeName} = Guml.LoadGuml(root, \"{EscapeString(importGumlPath)}\");");
-                    }
-                    else
-                    {
-                        sb.AppendLine($"            var import_{importControllerTypeName} = Guml.LoadGuml(rootNode, \"{EscapeString(importGumlPath)}\");");
-                    }
-                    sb.AppendLine($"            ctrl.{importControllerTypeName} = ({importControllerTypeName})import_{importControllerTypeName};");
-                }
-            }
 
             sb.AppendLine("            root.AddChild(rootNode);");
             sb.AppendLine("            ctrl.GumlRootNode = rootNode;");
@@ -456,58 +435,51 @@ internal sealed class GumlCodeEmitter
     }
 
     /// <summary>
-    /// Emits code for a single AST node (component declaration) and its children.
+    /// Emits code for a single component node and its children.
     /// </summary>
-    /// <returns>The variable name assigned to this node.</returns>
-    private string EmitNode(StringBuilder sb, GumlSyntaxNode node, string? parentVarName, string indent,
-        CompilationApiScanner? scanner)
+    private string EmitNode(StringBuilder sb, ComponentDeclarationSyntax comp,
+        string? parentVarName, string indent, CompilationApiScanner? scanner)
     {
-        string varName = GetVariableName(node);
+        string typeName = comp.TypeName.Text;
+        string varName = GetVariableName(comp);
         _currentNodeVar = varName;
 
         // 1. Check if this node matches an import
-        string? importKey = null;
         string? importedControllerType = null;
         string? importedViewType = null;
-        GumlDoc? importedDoc = null;
+        GumlDocumentSyntax? importedDoc = null;
 
-        foreach (var kvp in _currentDoc.Imports)
+        if (_currentDoc != null)
         {
-            string path = kvp.Key;
-            var info = kvp.Value;
-
-            // Robust path parsing
-            string fileName = path.Replace('\\', '/').TrimEnd('/');
-            int lastSlash = fileName.LastIndexOf('/');
-            if (lastSlash >= 0) fileName = fileName.Substring(lastSlash + 1);
-            if (fileName.EndsWith(".guml", StringComparison.OrdinalIgnoreCase))
-                fileName = fileName.Substring(0, fileName.Length - 5);
-
-            string nameInGuml = info.Alias ?? KeyConverter.ToPascalCase(fileName);
-
-            if (nameInGuml == node.Name)
+            foreach (var import in _currentDoc.Imports)
             {
-                importKey = path;
-                importedControllerType = KeyConverter.ToPascalCase(fileName) + "Controller";
-                importedViewType = KeyConverter.ToPascalCase(fileName) + "GumlView";
-                break;
+                string importFileName = GetImportFileName(import);
+                string nameInGuml = import.Alias != null
+                    ? import.Alias.Name.Text
+                    : KeyConverter.ToPascalCase(importFileName);
+
+                if (nameInGuml == typeName)
+                {
+                    importedControllerType = KeyConverter.ToPascalCase(importFileName) + "Controller";
+                    importedViewType = KeyConverter.ToPascalCase(importFileName) + "GumlView";
+                    if (_importResolver != null)
+                    {
+                        string importPath = StripQuotes(import.Path.Text);
+                        importedDoc = _importResolver(importPath);
+                    }
+                    break;
+                }
             }
         }
 
-        if (importKey != null && _importResolver != null)
-        {
-            importedDoc = _importResolver(importKey);
-        }
+        bool isImported = importedControllerType != null;
 
-        bool isImported = importKey != null;
-
-        sb.AppendLine($"{indent}// Node: {node.Name} ({varName})");
+        sb.AppendLine($"{indent}// Node: {typeName} ({varName})");
 
         string? controllerVarName = null;
 
         if (isImported)
         {
-            // Imported Component Instantiation
             controllerVarName = varName + "_ctrl";
             string viewVarName = varName + "_view";
 
@@ -520,253 +492,165 @@ internal sealed class GumlCodeEmitter
         }
         else
         {
-            // Native Godot Node Instantiation
-            sb.AppendLine($"{indent}var {varName} = new {node.Name}();");
+            sb.AppendLine($"{indent}var {varName} = new {typeName}();");
         }
 
-        // Create BindingScope for this node
+        // Create BindingScope
         sb.AppendLine($"{indent}var scope_{varName} = new BindingScope({varName});");
         if (parentVarName != null)
         {
             sb.AppendLine($"{indent}scope_{parentVarName}.Add(scope_{varName});");
         }
 
-        // 2. Properties
-        foreach (var kvp in node.Properties)
+        // 2. Process members
+        foreach (var member in comp.Members)
         {
-            string propName = kvp.Key; // e.g., "Text"
-
-            if (propName == "ThemeOverrides")
+            switch (member)
             {
-                // Theme overrides apply to the Godot Control node (View), even for imported components
-                EmitThemeOverrides(sb, varName, kvp.Value.Item2, indent);
-                continue;
-            }
-
-            bool useController = false;
-
-            if (isImported && importedDoc != null)
-            {
-                // Check if propName is actually an alias in the imported component
-                string aliasKey = "@" + KeyConverter.ToCamelCase(propName);
-                if (importedDoc.LocalAlias.TryGetValue(aliasKey, out _))
+                case PropertyAssignmentSyntax prop:
                 {
-                   propName = KeyConverter.ToPascalCase(aliasKey.TrimStart('@'));
-                   useController = true;
+                    string propName = KeyConverter.ToPascalCase(prop.Name.Text);
+
+                    if (_pseudoPropProvider.PseudoPropertyNames.Contains(prop.Name.Text))
+                    {
+                        var pseudoLines = _pseudoPropProvider.EmitPseudoProperty(
+                            varName, typeName, prop.Name.Text, prop.Value,
+                            node => EmitExpression((ExpressionSyntax)node), indent);
+                        foreach (string line in pseudoLines)
+                            sb.AppendLine(line);
+                        continue;
+                    }
+
+                    string targetVar = varName;
+                    string targetType = typeName;
+
+                    if (isImported)
+                    {
+                        bool useController = ShouldTargetController(propName, importedDoc,
+                            importedControllerType!, scanner);
+                        if (useController)
+                        {
+                            targetVar = controllerVarName!;
+                            targetType = importedControllerType!;
+                        }
+                    }
+
+                    string valExpr = EmitExpressionWithEnumQualification(prop.Value, targetType,
+                        propName, scanner);
+
+                    string? castExpr = GetPropertyCast(targetType, propName, scanner);
+                    if (castExpr != null)
+                    {
+                        valExpr = castExpr.StartsWith("Convert.")
+                            ? $"{castExpr}({valExpr})"
+                            : $"{castExpr}{valExpr}";
+                    }
+
+                    sb.AppendLine($"{indent}{targetVar}.{propName} = {valExpr};");
+                    break;
                 }
-                // Check if propName refers to a parameter
-                else if (importedDoc.RootNode.ParameterNodes.Any(p => KeyConverter.ToPascalCase(p.ParameterName) == KeyConverter.ToPascalCase(propName)))
+
+                case MappingAssignmentSyntax mapping:
                 {
-                    propName = KeyConverter.ToPascalCase(propName);
-                    useController = true;
+                    string propName = KeyConverter.ToPascalCase(mapping.Name.Text);
+
+                    string targetVar = varName;
+                    string targetType = typeName;
+
+                    if (isImported)
+                    {
+                        bool useController = ShouldTargetController(propName, importedDoc,
+                            importedControllerType!, scanner);
+                        if (useController)
+                        {
+                            targetVar = controllerVarName!;
+                            targetType = importedControllerType!;
+                        }
+                    }
+
+                    EmitBinding(sb, targetVar, targetType, propName, mapping.Value, indent, scanner);
+                    break;
                 }
-            }
 
-            // Fallback: Check scanner for explicit controller properties
-            if (isImported && !useController && scanner != null && importedControllerType != null)
-            {
-                 // Check if the controller type actually has this property
-                 if (scanner.HasProperty(importedControllerType, propName))
-                 {
-                     useController = true;
-                 }
-            }
+                case EventSubscriptionSyntax evt:
+                {
+                    string signalText = evt.EventRef.Text; // e.g. "#pressed"
+                    string signalName = KeyConverter.ToPascalCase(signalText.TrimStart('#'));
+                    string handlerExpr = EmitEventHandler(evt.Handler);
 
-            if (isImported)
-            {
-                 if (useController)
-                 {
-                     EmitPropertyOrBinding(sb, controllerVarName!, importedControllerType!, propName, kvp.Value, indent, scanner);
-                 }
-                 else
-                 {
-                     // Fallback to setting on the view (Control)
-                     EmitPropertyOrBinding(sb, varName, "Control", propName, kvp.Value, indent, scanner);
-                 }
-            }
-            else
-            {
-                EmitPropertyOrBinding(sb, varName, node.Name, propName, kvp.Value, indent, scanner);
+                    bool isGumlEvent = isImported && importedDoc != null
+                        && GetEvents(importedDoc.RootComponent)
+                            .Any(e => KeyConverter.ToPascalCase(e.Name.Text) == signalName);
+
+                    if (isGumlEvent)
+                    {
+                        sb.AppendLine($"{indent}{controllerVarName}.{signalName} += {handlerExpr};");
+                    }
+                    else
+                    {
+                        sb.AppendLine($"{indent}{_eventProvider.EmitEventSubscription(varName, signalName, handlerExpr)}");
+                    }
+                    break;
+                }
+
+                case ComponentDeclarationSyntax child:
+                    EmitNode(sb, child, varName, indent, scanner);
+                    break;
+
+                case EachBlockSyntax each:
+                    EmitEach(sb, each, varName, indent, scanner);
+                    break;
+
+                case TemplateParamAssignmentSyntax templateParam:
+                {
+                    string paramName = KeyConverter.ToPascalCase(templateParam.Name.Text);
+                    string childVarName = EmitNode(sb, templateParam.Component, null, indent, scanner);
+                    sb.AppendLine(isImported
+                        ? $"{indent}{controllerVarName}.{paramName} = {childVarName};"
+                        : $"{indent}{varName}.{paramName} = {childVarName};");
+                    break;
+                }
             }
         }
 
-        // 3. Signals / Events
-        foreach (var kvp in node.Signals)
-        {
-            string signalName = kvp.Key; // raw string from parser (e.g. "pressed" from "#pressed")
-            string evtName = KeyConverter.ToPascalCase(signalName);
-            string handlerExpr = EmitExpression(kvp.Value);
+        // Metadata
+        sb.AppendLine($"{indent}{varName}.SetMeta(\"GumlNodeName\", \"{typeName}\");");
 
-            bool isEvent = false;
-            if (isImported && importedDoc != null)
-            {
-                isEvent = importedDoc.RootNode.EventNodes.Any(e => KeyConverter.ToPascalCase(e.EventName) == evtName);
-            }
-
-            if (isImported && isEvent)
-            {
-                sb.AppendLine($"{indent}{controllerVarName}.{evtName} += {handlerExpr};");
-            }
-            else
-            {
-                sb.AppendLine($"{indent}{varName}.{evtName} += {handlerExpr};");
-            }
-        }
-
-        // Common: Metadata
-        sb.AppendLine($"{indent}{varName}.SetMeta(\"GumlNodeName\", \"{node.Name}\");");
-
-        // Hierarchy (Add Children)
+        // Add to parent
         if (parentVarName != null)
         {
             sb.AppendLine($"{indent}{parentVarName}.AddChild({varName});");
         }
 
-        // Process Children
-        foreach (var childNode in node.Children)
-        {
-            EmitNode(sb, childNode, varName, indent, scanner);
-        }
-
-        // Process Each Nodes
-        foreach (var eachNode in node.EachNodes)
-        {
-            EmitEach(sb, eachNode, varName, indent, scanner);
-        }
-
         // Handle Alias Assignment
-        if (_nodeAliasMap.TryGetValue(node, out var aliasInfo))
+        if (_nodeAliasMap.TryGetValue(comp, out var aliasInfo))
         {
-            if (isImported)
+            sb.AppendLine(isImported
+                ? $"{indent}this.{aliasInfo.PropertyName} = {controllerVarName};"
+                : $"{indent}this.{aliasInfo.PropertyName} = {varName};");
+
+            if (_hasControllerTypeName)
             {
-                sb.AppendLine($"{indent}this.{aliasInfo.PropertyName} = {controllerVarName};");
-            }
-            else
-            {
-                sb.AppendLine($"{indent}this.{aliasInfo.PropertyName} = {varName};");
+                sb.AppendLine(isImported
+                    ? $"{indent}_controller.{aliasInfo.PropertyName} = {controllerVarName};"
+                    : $"{indent}_controller.{aliasInfo.PropertyName} = {varName};");
             }
         }
 
         return varName;
     }
 
-    private void EmitPropertyOrBinding(StringBuilder sb, string destVar, string typeName, string propName, (bool isBind, GumlExprNode expr) value, string indent, CompilationApiScanner? scanner)
-    {
-        if (value.isBind)
-        {
-            // Binding
-            EmitBinding(sb, destVar, typeName, propName, value.expr, indent, scanner);
-        }
-        else
-        {
-            // Static Assignment
-            string valExpr;
-
-            // Special handling for Enum values to prepend Type Name (e.g. Center -> LayoutPreset.Center)
-            if (scanner != null && scanner.IsAvailable
-                && value.expr is GumlValueNode { ValueType: GumlValueType.Enum } enumVal)
-            {
-                 var propType = scanner.ResolvePropertyType(typeName, propName);
-                 if (propType != null && propType.TypeKind == Microsoft.CodeAnalysis.TypeKind.Enum)
-                 {
-                     string enumFullName = propType.ToDisplayString(Microsoft.CodeAnalysis.SymbolDisplayFormat.FullyQualifiedFormat);
-                     valExpr = $"{enumFullName}.{enumVal.EnumMemberName}";
-                 }
-                 else
-                 {
-                     valExpr = EmitExpression(value.expr);
-                 }
-            }
-            else
-            {
-                 valExpr = EmitExpression(value.expr);
-            }
-
-            // Type casting for other types (int -> Enum, float -> int, etc.)
-            string? castExpr = null;
-            if (scanner != null && scanner.IsAvailable)
-            {
-                var propType = scanner.ResolvePropertyType(typeName, propName);
-                if (propType != null)
-                {
-                    castExpr = CompilationApiScanner.GetCastExpression(propType);
-                }
-            }
-
-            if (castExpr != null)
-            {
-                 // Avoid double casting if valExpr already contains the type (for enums handled above)
-                 // But wait, if valExpr is "Enum.Center", casting to (Enum) is fine.
-
-                 // Special check: if we just resolved an enum and prepended the type, we might not need the cast or the cast is redundant but harmless.
-                 // However, "Godot.LayoutPreset.Center" is arguably an expression of that type.
-
-                 if (castExpr.StartsWith("Convert."))
-                     valExpr = $"{castExpr}({valExpr})";
-                 else
-                     valExpr = $"{castExpr}{valExpr}";
-            }
-
-            sb.AppendLine($"{indent}{destVar}.{propName} = {valExpr};");
-        }
-    }
-
-
     /// <summary>
-    /// Generates a unique variable name for a component node.
-    /// Root node gets "root"; others get lowercaseType + counter.
-    /// </summary>
-    private string GetVariableName(GumlSyntaxNode node)
-    {
-        if (_varCounter == 0)
-        {
-            _varCounter++;
-            return "root";
-        }
-
-        string baseName;
-        if (_nodeAliasMap.TryGetValue(node, out var aliasInfo))
-        {
-            // Use alias name as variable name (camelCase)
-            baseName = KeyConverter.ToCamelCase(aliasInfo.AliasKey.TrimStart('@'));
-        }
-        else
-        {
-           // Fallback to TypeName
-           baseName = char.ToLowerInvariant(node.Name[0]) + node.Name.Substring(1);
-        }
-
-        string name = $"{baseName}_{_varCounter}";
-        _varCounter++;
-        return name;
-    }
-
-    /// <summary>
-    /// Emits a data binding using <c>BindingExpression</c> and registers it with the node's <c>BindingScope</c>.
-    /// When a <see cref="CompilationApiScanner"/> is available and the property type can be resolved,
-    /// generates a direct setter delegate (zero-reflection). Otherwise falls back to string property name (reflection).
+    /// Emits a data binding using BindingExpression.
     /// </summary>
     private void EmitBinding(StringBuilder sb, string varName, string componentType,
-        string propertyName, GumlExprNode exprNode, string indent, CompilationApiScanner? scanner)
+        string propertyName, ExpressionSyntax exprNode, string indent, CompilationApiScanner? scanner)
     {
         int bindingId = _bindingCounter++;
-        string valueExpr = EmitExpression(exprNode);
+        string valueExpr = EmitExpressionWithEnumQualification(exprNode, componentType, propertyName, scanner);
 
-        // Resolve enum values to fully qualified names
-        if (scanner != null && scanner.IsAvailable
-            && exprNode is GumlValueNode { ValueType: GumlValueType.Enum } bindEnumVal)
-        {
-            var propType = scanner.ResolvePropertyType(componentType, propertyName);
-            if (propType != null && propType.TypeKind == Microsoft.CodeAnalysis.TypeKind.Enum)
-            {
-                string enumFullName = propType.ToDisplayString(Microsoft.CodeAnalysis.SymbolDisplayFormat.FullyQualifiedFormat);
-                valueExpr = $"{enumFullName}.{bindEnumVal.EnumMemberName}";
-            }
-        }
-
-        // Collect controller property dependencies from the expression
-        var deps = new HashSet<string>();
-        CollectControllerDependencies(exprNode, deps);
+        // Collect dependencies
+        var deps = CollectControllerDependencies(exprNode);
 
         string depsExpr;
         if (deps.Count > 0)
@@ -779,16 +663,7 @@ internal sealed class GumlCodeEmitter
             depsExpr = "new HashSet<string>()";
         }
 
-        // Try to resolve property type for zero-reflection binding
-        string? castExpr = null;
-        if (scanner != null && scanner.IsAvailable)
-        {
-            var propType = scanner.ResolvePropertyType(componentType, propertyName);
-            if (propType != null)
-            {
-                castExpr = CompilationApiScanner.GetCastExpression(propType);
-            }
-        }
+        string? castExpr = GetPropertyCast(componentType, propertyName, scanner);
 
         sb.AppendLine($"{indent}// Binding: {propertyName}:= ...");
         sb.AppendLine($"{indent}var binding{bindingId} = new BindingExpression(");
@@ -796,22 +671,16 @@ internal sealed class GumlCodeEmitter
 
         if (castExpr != null)
         {
-            // Zero-reflection path: direct setter with type cast
-            if (castExpr.StartsWith("Convert."))
-            {
-                // Convert.ToSingle(val) style
-                sb.AppendLine($"{indent}    (val) => {varName}.{propertyName} = {castExpr}(val),");
-            }
-            else
-            {
-                // (type)val style
-                sb.AppendLine($"{indent}    (val) => {varName}.{propertyName} = {castExpr}val,");
-            }
+            sb.AppendLine(castExpr.StartsWith("Convert.")
+                ? $"{indent}    (val) => {varName}.{propertyName} = {castExpr}(val),"
+                : $"{indent}    (val) => {varName}.{propertyName} = {castExpr}val,");
         }
         else
         {
-            // Reflection fallback: string property name
-            sb.AppendLine($"{indent}    \"{propertyName}\",");
+            // Property type could not be resolved at source-generation time; fall back to dynamic
+            // dispatch so that the binding is still active at runtime.
+            sb.AppendLine($"{indent}    // WARNING: type of '{propertyName}' on '{componentType}' could not be resolved.");
+            sb.AppendLine($"{indent}    (val) => ((dynamic){varName}).{propertyName} = val,");
         }
 
         sb.AppendLine($"{indent}    () => {valueExpr},");
@@ -822,64 +691,65 @@ internal sealed class GumlCodeEmitter
     }
 
     /// <summary>
-    /// Emits code for an 'each' block (list rendering) with dynamic ListBinding support.
-    /// <para>
-    /// Uses <c>EachScope</c> to pass loop variables through a chained scope,
-    /// avoiding nested closure capture bugs. Each iteration creates its own <c>EachScope</c>
-    /// whose parent points to the enclosing each's scope.
-    /// </para>
-    /// <para>
-    /// For <c>ListChangedType.Add</c> events, only the new item is rendered (incremental).
-    /// For other change types (Remove, Insert, Clear), a full re-render is performed.
-    /// </para>
+    /// Emits code for an 'each' block.
     /// </summary>
-    private void EmitEach(StringBuilder sb, GumlEachNode each, string parentVarName, string indent,
-        CompilationApiScanner? scanner)
+    private void EmitEach(StringBuilder sb, EachBlockSyntax each, string parentVarName,
+        string indent, CompilationApiScanner? scanner)
     {
         int eachId = _eachCounter++;
         string dataSourceExpr = EmitExpression(each.DataSource);
         string parentScopeExpr = _eachScopeStack.Count > 0 ? _eachScopeStack.Peek().ScopeVar : "null";
 
+        string indexName = each.IndexName?.Text ?? "index";
+        string valueName = each.ValueName?.Text ?? "value";
+
         sb.AppendLine($"{indent}// each {dataSourceExpr}");
 
-        // Use an EachScope as the manager of this each-block's items
-        GumlExprNode? cacheSizeExpr = null;
+        // Cache param
+        string cacheCountArg = "0";
         if (each.Params != null)
         {
-            if (!each.Params.TryGetValue("cache", out cacheSizeExpr))
+            foreach (var prop in each.Params.Properties)
             {
-                each.Params.TryGetValue("Cache", out cacheSizeExpr);
+                string paramName = prop.Name.Text.ToLowerInvariant();
+                if (paramName == "cache")
+                {
+                    cacheCountArg = EmitExpression(prop.Value);
+                    break;
+                }
             }
         }
-        string cacheCountArg = cacheSizeExpr != null ? EmitExpression(cacheSizeExpr) : "0";
 
         string managerScopeVar = $"__each_{eachId}";
         sb.AppendLine($"{indent}var {managerScopeVar} = new EachListManager({cacheCountArg});");
 
-        // Capture static child count as offset for this each block
         sb.AppendLine($"{indent}int __offset_{eachId} = {parentVarName}.GetChildCount();");
 
-        // --- createItem: creates a fresh node LIST for a single data datum ---
+        // createItem delegate
         sb.AppendLine($"{indent}Func<int, object, List<Node>> createItem_{eachId} = (__idx_{eachId}, __val_{eachId}) =>");
         sb.AppendLine($"{indent}{{");
         sb.AppendLine($"{indent}    var __itemScope_{eachId} = new EachScope({parentScopeExpr});");
-        sb.AppendLine($"{indent}    __itemScope_{eachId}[\"{each.IndexName}\"] = __idx_{eachId};");
-        sb.AppendLine($"{indent}    __itemScope_{eachId}[\"{each.ValueName}\"] = __val_{eachId};");
+        sb.AppendLine($"{indent}    __itemScope_{eachId}[\"{indexName}\"] = __idx_{eachId};");
+        sb.AppendLine($"{indent}    __itemScope_{eachId}[\"{valueName}\"] = __val_{eachId};");
         sb.AppendLine($"{indent}    var __nodes = new List<Node>();");
 
-        _eachScopeStack.Push(($"__itemScope_{eachId}", new HashSet<string> { each.IndexName, each.ValueName }));
+        // Resolve collection element type for typed code generation
+        string? elementType = ResolveEachElementType(each.DataSource, scanner);
+        _eachScopeStack.Push(($"__itemScope_{eachId}", indexName, valueName, elementType));
 
-        // Emit child components
-        for (int i = 0; i < each.Children.Count; i++)
+        // Emit body children
+        if (each.Body != null)
         {
-            var child = each.Children[i];
-            // We pass null for cacheStackVar because EachScope/EachListManager now handles caching
-            // Pass null for parentVarName because EachListManager controls the hierarchy (Reconcile)
-            string childVarName = EmitNode(sb, child, null, indent + "    ", scanner);
-            sb.AppendLine($"{indent}    __nodes.Add({childVarName});");
+            foreach (var child in each.Body)
+            {
+                if (child is ComponentDeclarationSyntax childComp)
+                {
+                    string childVarName = EmitNode(sb, childComp, null, indent + "    ", scanner);
+                    sb.AppendLine($"{indent}    __nodes.Add({childVarName});");
+                }
+            }
         }
 
-        // Set scope metadata on all root nodes of the item
         sb.AppendLine($"{indent}    foreach (var n in __nodes)");
         sb.AppendLine($"{indent}    {{");
         sb.AppendLine($"{indent}        n.SetMeta(\"GumlEachScope\", __itemScope_{eachId});");
@@ -889,599 +759,957 @@ internal sealed class GumlCodeEmitter
         sb.AppendLine($"{indent}    return __nodes;");
         sb.AppendLine($"{indent}}};");
 
-        // --- updateItem: updates an existing node with new data ---
+        // updateItem delegate
         sb.AppendLine($"{indent}Action<Node, int, object> updateItem_{eachId} = (__node, __idx_{eachId}, __val_{eachId}) =>");
         sb.AppendLine($"{indent}{{");
         sb.AppendLine($"{indent}    if (__node.HasMeta(\"GumlEachScope\"))");
         sb.AppendLine($"{indent}    {{");
         sb.AppendLine($"{indent}        var __es = __node.GetMeta(\"GumlEachScope\").As<EachScope>();");
-        sb.AppendLine($"{indent}        __es[\"{each.IndexName}\"] = __idx_{eachId};");
-        sb.AppendLine($"{indent}        __es[\"{each.ValueName}\"] = __val_{eachId};");
+        sb.AppendLine($"{indent}        __es[\"{indexName}\"] = __idx_{eachId};");
+        sb.AppendLine($"{indent}        __es[\"{valueName}\"] = __val_{eachId};");
         sb.AppendLine($"{indent}        BindingScope.UpdateRecursive(__node);");
         sb.AppendLine($"{indent}    }}");
         sb.AppendLine($"{indent}}};");
 
-        // --- Perform initial reconcile ---
-        sb.AppendLine($"{indent}{managerScopeVar}.Reconcile({dataSourceExpr}, {parentVarName}, createItem_{eachId}, updateItem_{eachId}, __offset_{eachId});");
+        // Initial reconcile
+        sb.AppendLine($"{indent}{managerScopeVar}.Reconcile((System.Collections.IList){dataSourceExpr}, {parentVarName}, createItem_{eachId}, updateItem_{eachId}, __offset_{eachId});");
 
-        // --- Watch for changes ---
-        sb.AppendLine($"{indent}var listBinding_{eachId} = new ListBinding(() => (INotifyListChanged){dataSourceExpr},");
-        sb.AppendLine($"{indent}    (_, _, _, _) =>");
+        // ListBinding for change notification
+        sb.AppendLine($"{indent}var listBinding_{eachId} = new ListBinding(() => (System.Collections.Specialized.INotifyCollectionChanged){dataSourceExpr},");
+        sb.AppendLine($"{indent}    () =>");
         sb.AppendLine($"{indent}    {{");
-        sb.AppendLine($"{indent}        {managerScopeVar}.Reconcile({dataSourceExpr}, {parentVarName}, createItem_{eachId}, updateItem_{eachId}, __offset_{eachId});");
+        sb.AppendLine($"{indent}        {managerScopeVar}.Reconcile((System.Collections.IList){dataSourceExpr}, {parentVarName}, createItem_{eachId}, updateItem_{eachId}, __offset_{eachId});");
+        sb.AppendLine($"{indent}    }},");
+        sb.AppendLine($"{indent}    (__vidx_{eachId}, __vval_{eachId}) =>");
+        sb.AppendLine($"{indent}    {{");
+        sb.AppendLine($"{indent}        if (__vval_{eachId} != null)");
+        sb.AppendLine($"{indent}            {managerScopeVar}.UpdateSingleItem(__vidx_{eachId}, __vval_{eachId}, updateItem_{eachId});");
         sb.AppendLine($"{indent}    }});");
         sb.AppendLine($"{indent}scope_{parentVarName}.Add(listBinding_{eachId});");
     }
 
     /// <summary>
-    /// Emits theme override property assignments.
+    /// Attempts to resolve the element type of an each-block data source expression.
+    /// Supports <c>$controller.PropertyName</c> and bare <c>propertyName</c> patterns.
+    /// Returns <c>null</c> when the type cannot be resolved (falls back to dynamic).
     /// </summary>
-    private void EmitThemeOverrides(StringBuilder sb, string varName, GumlExprNode exprNode, string indent)
+    private string? ResolveEachElementType(ExpressionSyntax dataSource, CompilationApiScanner? scanner)
     {
-        if (exprNode is GumlValueNode { ValueType: GumlValueType.Dictionary, DictionaryValue: not null } valueNode)
+        if (scanner == null || _activeControllerTypeName == null)
+            return null;
+
+        string? propName = null;
+
+        // Pattern 1: $controller.Items (MemberAccess on $controller)
+        if (dataSource is MemberAccessExpressionSyntax ma &&
+            ma.Expression is ReferenceExpressionSyntax { Identifier.Kind: SyntaxKind.GlobalRefToken, Identifier.Text: "$controller" or "$root" })
         {
-            foreach (var kvp in valueNode.DictionaryValue)
-            {
-                // Unpack nested categories if the user grouped them (e.g. constants: { ... })
-                if (kvp.Value is GumlValueNode { ValueType: GumlValueType.Dictionary } nestedDict)
-                {
-                    // Recursively emit overrides from the nested dictionary
-                    EmitThemeOverrides(sb, varName, nestedDict, indent);
-                    continue;
-                }
-
-                string overrideName = KeyConverter.FromCamelCase(kvp.Key);
-                string valueExpr = EmitExpression(kvp.Value);
-                // Theme overrides use AddTheme*Override methods
-                sb.AppendLine($"{indent}// ThemeOverride: {overrideName}");
-
-                // Choose override method by the expression node type when possible.
-                switch (kvp.Value)
-                {
-                    case GumlValueNode gv when gv.ValueType == GumlValueType.Color:
-                        sb.AppendLine($"{indent}{varName}.AddThemeColorOverride(\"{overrideName}\", {valueExpr});");
-                        break;
-
-                    case GumlValueNode gv when gv.ValueType == GumlValueType.Font:
-                        sb.AppendLine($"{indent}{varName}.AddThemeFontOverride(\"{overrideName}\", {valueExpr});");
-                        break;
-
-                    case GumlValueNode gv when gv.ValueType == GumlValueType.Image:
-                        // Image -> icon/texture override
-                        sb.AppendLine($"{indent}{varName}.AddThemeIconOverride(\"{overrideName}\", {valueExpr});");
-                        break;
-
-                    case GumlValueNode gv when gv.ValueType == GumlValueType.StyleBox:
-                        sb.AppendLine($"{indent}{varName}.AddThemeStyleboxOverride(\"{overrideName}\", {valueExpr});");
-                        break;
-
-                    case GumlValueNode gv when gv.ValueType == GumlValueType.Int || gv.ValueType == GumlValueType.Float:
-                        // Heuristic: font size keys often contain "font_size" or "size"
-                        if (overrideName.IndexOf("font_size", StringComparison.OrdinalIgnoreCase) >= 0 || overrideName.IndexOf("size", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                             // Ensure separation uses Constant override, not FontSize
-                             if (overrideName.Contains("separation"))
-                             {
-                                 sb.AppendLine($"{indent}{varName}.AddThemeConstantOverride(\"{overrideName}\", Convert.ToInt32({valueExpr}));");
-                             }
-                             else
-                             {
-                                 sb.AppendLine($"{indent}{varName}.AddThemeFontSizeOverride(\"{overrideName}\", Convert.ToInt32({valueExpr}));");
-                             }
-                        }
-                        else
-                        {
-                            sb.AppendLine($"{indent}{varName}.AddThemeConstantOverride(\"{overrideName}\", Convert.ToInt32({valueExpr}));");
-                        }
-                        break;
-
-                    default:
-                        // Fallback: try constant override first, leave TODO comment for manual adjustment
-                        sb.AppendLine($"{indent}// Fallback: emit constant override (adjust if this key expects color/font/style)");
-                        sb.AppendLine($"{indent}{varName}.AddThemeConstantOverride(\"{overrideName}\", Convert.ToInt32({valueExpr}));");
-                        break;
-                }
-            }
+            propName = KeyConverter.ToPascalCase(ma.Name.Text);
         }
+        // Pattern 2: bare identifier (camelCase controller property)
+        else if (dataSource is ReferenceExpressionSyntax { Identifier.Kind: SyntaxKind.IdentifierToken } ident)
+        {
+            string name = ident.Identifier.Text;
+            string pascal = KeyConverter.ToPascalCase(name);
+            if (scanner.HasProperty(_activeControllerTypeName, pascal))
+                propName = pascal;
+            else if (scanner.HasProperty(_activeControllerTypeName, name))
+                propName = name;
+        }
+
+        if (propName == null) return null;
+
+        return scanner.ResolveCollectionElementType(_activeControllerTypeName, propName);
     }
 
+    // ========================================
+    // Expression emission
+    // ========================================
+
     /// <summary>
-    /// Converts an AST expression node into a C# expression string.
+    /// Converts a CST expression node into a C# expression string.
     /// </summary>
-    private string EmitExpression(GumlExprNode node)
+    private string EmitExpression(ExpressionSyntax node)
     {
         switch (node)
         {
-            case GumlStructNode structNode:
-                return EmitStructExpression(structNode);
+            case LiteralExpressionSyntax literal:
+                return EmitLiteral(literal);
 
-            case GumlValueNode valueNode:
-                return EmitValueExpression(valueNode);
+            case ReferenceExpressionSyntax reference:
+                return EmitReference(reference);
 
-            case InfixOpNode infixNode:
-                string left = EmitExpression(infixNode.Left);
-                string right = EmitExpression(infixNode.Right);
-                return $"({left} {infixNode.Op} {right})";
+            case MemberAccessExpressionSyntax memberAccess:
+                return EmitMemberAccess(memberAccess);
 
-            case PrefixOpNode prefixNode:
-                string operand = EmitExpression(prefixNode.Right);
-                return $"({prefixNode.Op}{operand})";
+            case BinaryExpressionSyntax binary:
+                return $"({EmitExpression(binary.Left)} {binary.OperatorToken.Text} {EmitExpression(binary.Right)})";
+
+            case PrefixUnaryExpressionSyntax prefix:
+                return $"({prefix.OperatorToken.Text}{EmitExpression(prefix.Operand)})";
+
+            case ConditionalExpressionSyntax cond:
+                return $"({EmitExpression(cond.Condition)} ? {EmitExpression(cond.WhenTrue)} : {EmitExpression(cond.WhenFalse)})";
+
+            case CallExpressionSyntax call:
+                return EmitCallExpression(call);
+
+            case StructExpressionSyntax structExpr:
+                return EmitStructExpression(structExpr);
+
+            case ResourceExpressionSyntax resource:
+                return EmitResourceExpression(resource);
+
+            case EnumValueExpressionSyntax enumValue:
+                // .Center → just emit the member name (caller applies enum type)
+                return enumValue.Token.Text.TrimStart('.');
+
+            case ObjectLiteralExpressionSyntax objLit:
+                return EmitObjectLiteral(objLit);
+
+            case ObjectCreationExpressionSyntax objCreate:
+                return EmitNewObj(objCreate);
+
+            case ArrayLiteralExpressionSyntax array:
+                return EmitArrayLiteral(array);
+
+            case DictionaryLiteralExpressionSyntax dict:
+                return EmitDictionaryLiteral(dict);
+
+            case ParenthesizedExpressionSyntax paren:
+                return $"({EmitExpression(paren.Expression)})";
+
+            case TemplateStringExpressionSyntax templateStr:
+                return EmitTemplateString(templateStr);
 
             default:
                 return "/* unsupported expression */";
         }
     }
 
-    /// <summary>
-    /// Converts a value node into a C# expression string.
-    /// </summary>
-    private string EmitValueExpression(GumlValueNode node)
+    private string EmitLiteral(LiteralExpressionSyntax literal)
     {
-        switch (node.ValueType)
+        switch (literal.Token.Kind)
         {
-            case GumlValueType.String:
-                return $"\"{EscapeString(node.StringValue)}\"";
+            case SyntaxKind.StringLiteralToken:
+                return $"\"{EscapeString(StripQuotes(literal.Token.Text))}\"";
 
-            case GumlValueType.Int:
-                return node.IntValue.ToString();
+            case SyntaxKind.IntegerLiteralToken:
+                return literal.Token.Text;
 
-            case GumlValueType.Float:
-                return node.FloatValue.ToString("G") + "f";
+            case SyntaxKind.FloatLiteralToken:
+                string floatText = literal.Token.Text;
+                if (!floatText.EndsWith("f", StringComparison.OrdinalIgnoreCase))
+                    floatText += "f";
+                return floatText;
 
-            case GumlValueType.Boolean:
-                return node.BooleanValue ? "true" : "false";
+            case SyntaxKind.TrueLiteralToken:
+                return "true";
 
-            case GumlValueType.Null:
+            case SyntaxKind.FalseLiteralToken:
+                return "false";
+
+            case SyntaxKind.NullLiteralToken:
                 return "null";
-
-            case GumlValueType.Vector2:
-                if (node.Vector2XNode != null && node.Vector2YNode != null)
-                {
-                    string x = EmitExpression(node.Vector2XNode);
-                    string y = EmitExpression(node.Vector2YNode);
-                    return $"new Vector2({x}, {y})";
-                }
-                return "Vector2.Zero";
-
-            case GumlValueType.Color:
-                if (node.ColorRNode != null && node.ColorGNode != null &&
-                    node.ColorBNode != null && node.ColorANode != null)
-                {
-                    string r = EmitExpression(node.ColorRNode);
-                    string g = EmitExpression(node.ColorGNode);
-                    string b = EmitExpression(node.ColorBNode);
-                    string a = EmitExpression(node.ColorANode);
-                    return $"new Color({r}, {g}, {b}, {a})";
-                }
-                return "new Color()";
-
-            case GumlValueType.StyleBox:
-                return EmitStyleBox(node);
-
-            case GumlValueType.Image:
-                if (node.ResourceNode != null)
-                {
-                    string path = EmitExpression(node.ResourceNode);
-                    return $"Guml.ResourceProvider.LoadImage({path}, {_currentNodeVar})";
-                }
-                return "null";
-            case GumlValueType.Font:
-                if (node.ResourceNode != null)
-                {
-                    string path = EmitExpression(node.ResourceNode);
-                    return $"Guml.ResourceProvider.LoadFont({path}, {_currentNodeVar})";
-                }
-                return "null";
-            case GumlValueType.Audio:
-                if (node.ResourceNode != null)
-                {
-                    string path = EmitExpression(node.ResourceNode);
-                    return $"Guml.ResourceProvider.LoadAudio({path}, {_currentNodeVar})";
-                }
-                return "null";
-            case GumlValueType.Video:
-                if (node.ResourceNode != null)
-                {
-                    string path = EmitExpression(node.ResourceNode);
-                    return $"Guml.ResourceProvider.LoadVideo({path}, {_currentNodeVar})";
-                }
-                return "null";
-
-            case GumlValueType.Ref:
-                return EmitRef(node);
-
-            case GumlValueType.Dictionary:
-                // Dictionary literals - emit inline
-                if (node.DictionaryValue != null)
-                {
-                    string[] entries = node.DictionaryValue
-                        .Select(kvp => $"{{ \"{kvp.Key}\", {EmitExpression(kvp.Value)} }}")
-                        .ToArray();
-                    return $"new System.Collections.Generic.Dictionary<string, object> {{ {string.Join(", ", entries)} }}";
-                }
-                return "null";
-
-            case GumlValueType.Enum:
-                // Emit bare member name; the caller applies the enum type cast/qualification.
-                return node.EnumMemberName!;
-            case GumlValueType.NewObj:
-                return EmitNewObj(node);
 
             default:
-                return "/* unsupported value type */";
+                return literal.Token.Text;
         }
     }
 
-    /// <summary>
-    /// Emits a StyleBox construction expression.
-    /// </summary>
-    private string EmitStyleBox(GumlValueNode node)
+    private string EmitReference(ReferenceExpressionSyntax reference)
     {
-        switch (node.StyleNodeType)
+        switch (reference.Identifier.Kind)
         {
-            case StyleNodeType.Empty:
-                return "new StyleBoxEmpty()";
-
-            case StyleNodeType.Flat:
-                if (node.StyleNode != null)
+            case SyntaxKind.GlobalRefToken:
+                string globalName = reference.Identifier.Text; // e.g. "$controller"
+                if (globalName is "$controller" or "$root")
+                    return "_controller";
+                if (globalName == "$item")
                 {
-                    return EmitStyleBoxWithProperties("StyleBoxFlat", node.StyleNode);
+                    if (_eachScopeStack.Count > 0)
+                    {
+                        (string scopeVar, _, _, _) = _eachScopeStack.Peek();
+                        return scopeVar;
+                    }
+                    // Template projection: $item used outside each scope — dynamic placeholder
+                    return "((dynamic)null!)";
                 }
-                return "new StyleBoxFlat()";
+                // Unknown global reference — emit as comment to surface the issue at compile time
+                return $"/* ERROR: unknown global ref '{globalName}' */ default(object)";
 
-            case StyleNodeType.Line:
-                if (node.StyleNode != null)
-                {
-                    return EmitStyleBoxWithProperties("StyleBoxLine", node.StyleNode);
-                }
-                return "new StyleBoxLine()";
+            case SyntaxKind.AliasRefToken:
+                string aliasName = reference.Identifier.Text; // e.g. "@hello"
+                if (_aliasMap.TryGetValue(aliasName, out string? mappedName))
+                    return mappedName;
+                return aliasName.TrimStart('@');
 
-            case StyleNodeType.Texture:
-                if (node.StyleNode != null)
-                {
-                    return EmitStyleBoxWithProperties("StyleBoxTexture", node.StyleNode);
-                }
-                return "new StyleBoxTexture()";
+            case SyntaxKind.IdentifierToken:
+                return EmitIdentifierRef(reference.Identifier.Text);
 
             default:
-                return "new StyleBoxEmpty()";
+                return reference.Identifier.Text;
         }
     }
 
-    /// <summary>
-    /// Emits a StyleBox with property initializer syntax.
-    /// </summary>
-    private string EmitStyleBoxWithProperties(string typeName, GumlExprNode propsNode)
+    private string EmitIdentifierRef(string name)
     {
-        if (propsNode is GumlValueNode { ValueType: GumlValueType.Dictionary, DictionaryValue: not null } objNode)
+        // Check if this is an each-scope variable
+        foreach ((string scopeVar, string idxName, string valName, string? elementType) in _eachScopeStack)
         {
-            var props = new List<string>();
-            foreach (var kvp in objNode.DictionaryValue)
+            if (name == idxName)
+                return $"((int){scopeVar}.Lookup(\"{name}\")!)";
+
+            if (name == valName)
             {
-                string key = kvp.Key;
-                string val = EmitExpression(kvp.Value);
+                if (elementType != null)
+                    return $"(({elementType}){scopeVar}.Lookup(\"{name}\")!)";
+                return $"((dynamic){scopeVar}.Lookup(\"{name}\"))";
+            }
+        }
 
-                if (typeName == "StyleBoxFlat")
+        // Check if this is a controller property
+        string propName = name;
+        bool isControllerProp = false;
+
+        if (_scanner != null && _activeControllerTypeName != null)
+        {
+            if (_scanner.HasProperty(_activeControllerTypeName, propName))
+            {
+                isControllerProp = true;
+            }
+            else
+            {
+                string pascalName = KeyConverter.ToPascalCase(propName);
+                if (_scanner.HasProperty(_activeControllerTypeName, pascalName))
                 {
-                    // Expand shorthands (permissive matching)
-                    string keyLower = key.Replace("_", "").ToLowerInvariant();
-
-                    if (keyLower == "borderwidth")
-                    {
-                        props.Add($"BorderWidthLeft = {val}");
-                        props.Add($"BorderWidthTop = {val}");
-                        props.Add($"BorderWidthRight = {val}");
-                        props.Add($"BorderWidthBottom = {val}");
-                        continue;
-                    }
-                    if (keyLower == "contentmargin")
-                    {
-                        props.Add($"ContentMarginLeft = {val}");
-                        props.Add($"ContentMarginTop = {val}");
-                        props.Add($"ContentMarginRight = {val}");
-                        props.Add($"ContentMarginBottom = {val}");
-                        continue;
-                    }
-                    if (keyLower == "cornerradius")
-                    {
-                        props.Add($"CornerRadiusTopLeft = {val}");
-                        props.Add($"CornerRadiusTopRight = {val}");
-                        props.Add($"CornerRadiusBottomRight = {val}");
-                        props.Add($"CornerRadiusBottomLeft = {val}");
-                        continue;
-                    }
-
-                    // Specific mapping or PascalCase conversion
-                    props.Add($"{KeyConverter.ToPascalCase(key)} = {val}");
-                }
-                else
-                {
-                    props.Add($"{KeyConverter.ToPascalCase(key)} = {val}");
+                    propName = pascalName;
+                    isControllerProp = true;
                 }
             }
-            return $"new {typeName}() {{ {string.Join(", ", props)} }}";
         }
-        return $"new {typeName}()";
+        else if (_hasControllerTypeName)
+        {
+            propName = KeyConverter.ToPascalCase(propName);
+            isControllerProp = true;
+        }
+
+        if (isControllerProp)
+            return $"_controller.{propName}";
+
+        return name;
     }
 
     /// <summary>
-    /// Emits a struct constructor expression (e.g., new Vector2I(10, 20)).
+    /// Emits a signal handler expression, handling declared events and call expressions.
     /// </summary>
-    private string EmitStructExpression(GumlStructNode node)
+    private string EmitEventHandler(ExpressionSyntax handler)
     {
-        string[] args = node.Args.Select(EmitExpression).ToArray();
-        string argsStr = string.Join(", ", args);
-        return node.TypeName switch
+        // Call expressions must be wrapped in a lambda
+        if (handler is CallExpressionSyntax)
+            return $"() => {EmitExpression(handler)}";
+
+        // References to declared events should use the Raise method
+        string? eventName = GetDeclaredEventName(handler);
+        if (eventName != null)
+            return $"_controller.Raise{KeyConverter.ToPascalCase(eventName)}";
+
+        return EmitExpression(handler);
+    }
+
+    /// <summary>
+    /// Checks if the expression references a declared event on the current document.
+    /// Returns the event name (snake_case) if found, null otherwise.
+    /// </summary>
+    private string? GetDeclaredEventName(ExpressionSyntax expr)
+    {
+        if (_currentDoc == null) return null;
+
+        if (expr is MemberAccessExpressionSyntax { Expression: ReferenceExpressionSyntax { Identifier.Kind: SyntaxKind.GlobalRefToken } refExpr } memberAccess
+            && (refExpr.Identifier.Text == "$root" || refExpr.Identifier.Text == "$controller"))
         {
-            "vec2i" => $"new Vector2I({argsStr})",
-            "vec3" => $"new Vector3({argsStr})",
-            "vec3i" => $"new Vector3I({argsStr})",
-            "vec4" => $"new Vector4({argsStr})",
-            "vec4i" => $"new Vector4I({argsStr})",
-            "rect2" => $"new Rect2({argsStr})",
-            "rect2i" => $"new Rect2I({argsStr})",
-            _ => throw new NotSupportedException($"Unknown struct type: {node.TypeName}")
+            string memberName = memberAccess.Name.Text;
+            var events = GetEvents(_currentDoc.RootComponent);
+            return events.Any(e => e.Name.Text == memberName) ? memberName : null;
+        }
+
+        return null;
+    }
+
+    private string EmitMemberAccess(MemberAccessExpressionSyntax memberAccess)
+    {
+        // Handle $item.xxx for each-scope variable lookup
+        if (memberAccess.Expression is ReferenceExpressionSyntax { Identifier: { Kind: SyntaxKind.GlobalRefToken, Text: "$item" } })
+        {
+            string member = memberAccess.Name.Text;
+            if (_eachScopeStack.Count > 0)
+            {
+                (string scopeVar, _, _, string? elementType) = _eachScopeStack.Peek();
+                if (elementType != null)
+                    return $"(({elementType}){scopeVar}.Lookup(\"{member}\")!)";
+                return $"((dynamic){scopeVar}.Lookup(\"{member}\"))";
+            }
+            // Template projection: dynamic placeholder
+            return "((dynamic)null!)";
+        }
+
+        string expr = EmitExpression(memberAccess.Expression);
+        string memberName = KeyConverter.ToPascalCase(memberAccess.Name.Text);
+        return $"{expr}.{memberName}";
+    }
+
+    private string EmitCallExpression(CallExpressionSyntax call)
+    {
+        // Check if this is a framework shorthand constructor call like vec2(...), color(...)
+        if (call.Expression is ReferenceExpressionSyntax { Identifier.Kind: SyntaxKind.IdentifierToken } refExpr)
+        {
+            string callName = refExpr.Identifier.Text;
+
+            // i18n: tr("msgid") / tr("msgid", { context: "ctx", key: val, ... })
+            if (callName == "tr")
+                return EmitTrCall(call);
+
+            // i18n: ntr("singular", "plural", count) / ntr(..., { context: "ctx", count: val })
+            if (callName == "ntr")
+                return EmitNtrCall(call);
+
+            if (_typeProvider.ResolveTypeShorthand(callName) != null)
+            {
+                var args = AsList(call.Arguments);
+                // Named args form: vec2({ x: 200, y: 100 }) → via EmitShorthandNamedConstruction
+                if (args.Count == 1 && args[0] is ObjectLiteralExpressionSyntax objLit)
+                {
+                    var namedArgs = AsList(objLit.Properties)
+                        .Select(p => (p.Name.Text, EmitExpression(p.Value)))
+                        .ToList();
+                    string? namedResult = _typeProvider.EmitShorthandNamedConstruction(callName, namedArgs);
+                    if (namedResult != null)
+                        return namedResult;
+                }
+                var positionalArgs = args.Select(EmitExpression).ToList();
+                string? posResult = _typeProvider.EmitShorthandConstruction(callName, positionalArgs);
+                if (posResult != null)
+                    return posResult;
+            }
+        }
+
+        string callee = EmitExpression(call.Expression);
+        string[] callArgs = AsList(call.Arguments).Select(EmitExpression).ToArray();
+        return $"{callee}({string.Join(", ", callArgs)})";
+    }
+
+    /// <summary>
+    /// Emits a <c>tr(msgid [, options])</c> call as
+    /// <c>(Guml.StringProvider?.Tr(msgid [, context [, args]]) ?? msgid)</c>.
+    /// The <c>options</c> argument is an object literal where the reserved key
+    /// <c>context</c> maps to the gettext context and all other keys become
+    /// the named <c>args</c> dictionary.
+    /// </summary>
+    private string EmitTrCall(CallExpressionSyntax call)
+    {
+        var argList = AsList(call.Arguments);
+        if (argList.Count == 0)
+            return "\"\"";
+
+        string msgid = EmitExpression(argList[0]);
+        (string? contextExpr, string? argsDictExpr) = ExtractTranslateOptions(argList, optionsIndex: 1);
+
+        string trArgs = BuildTrArgList(msgid, contextExpr, argsDictExpr);
+        return $"(Guml.StringProvider?.Tr({trArgs}) ?? {msgid})";
+    }
+
+    /// <summary>
+    /// Emits a <c>ntr(singular, plural, count [, options])</c> call as
+    /// <c>(Guml.StringProvider?.Ntr(...) ?? (count == 1 ? singular : plural))</c>.
+    /// </summary>
+    private string EmitNtrCall(CallExpressionSyntax call)
+    {
+        var argList = AsList(call.Arguments);
+        if (argList.Count < 3)
+            return "\"\"";
+
+        string singular = EmitExpression(argList[0]);
+        string plural   = EmitExpression(argList[1]);
+        string count    = EmitExpression(argList[2]);
+        (string? contextExpr, string? argsDictExpr) = ExtractTranslateOptions(argList, optionsIndex: 3);
+
+        string ntrArgs = BuildTrArgList($"{singular}, {plural}, {count}", contextExpr, argsDictExpr);
+        return $"(Guml.StringProvider?.Ntr({ntrArgs}) ?? ({count} == 1 ? {singular} : {plural}))";
+    }
+
+    /// <summary>
+    /// Reads the translate-options object literal at <paramref name="optionsIndex"/> in
+    /// <paramref name="argList"/> and returns separate expressions for
+    /// <c>context</c> (nullable) and the args dictionary (nullable).
+    /// </summary>
+    private (string? contextExpr, string? argsDictExpr) ExtractTranslateOptions(
+        List<ExpressionSyntax> argList, int optionsIndex)
+    {
+        if (argList.Count <= optionsIndex || argList[optionsIndex] is not ObjectLiteralExpressionSyntax opts)
+            return (null, null);
+
+        var props = AsList(opts.Properties);
+        var contextProp = props.FirstOrDefault(p => p.Name.Text == "context");
+        var otherProps  = props.Where(p => p.Name.Text != "context").ToList();
+
+        string? contextExpr  = contextProp != null ? EmitExpression(contextProp.Value) : null;
+        string? argsDictExpr = null;
+
+        if (otherProps.Count > 0)
+        {
+            string entries = string.Join(", ",
+                otherProps.Select(p => $"{{ \"{p.Name.Text}\", (object){EmitExpression(p.Value)} }}"));
+            argsDictExpr =
+                $"new System.Collections.Generic.Dictionary<string, object> {{ {entries} }}";
+        }
+
+        return (contextExpr, argsDictExpr);
+    }
+
+    /// <summary>
+    /// Builds the C# argument list string for Tr/Ntr, omitting trailing null parameters.
+    /// </summary>
+    private static string BuildTrArgList(string firstArgs, string? contextExpr, string? argsDictExpr)
+    {
+        if (argsDictExpr != null)
+            return $"{firstArgs}, {contextExpr ?? "null"}, {argsDictExpr}";
+        if (contextExpr != null)
+            return $"{firstArgs}, {contextExpr}";
+        return firstArgs;
+    }
+
+    private string EmitStructExpression(StructExpressionSyntax structExpr)
+    {
+        string structType = structExpr.TypeName.Text;
+
+        // Positional args
+        if (structExpr.PositionalArgs != null)
+        {
+            var args = AsList(structExpr.PositionalArgs).Select(EmitExpression).ToList();
+            string? posResult = _typeProvider.EmitShorthandConstruction(structType, args);
+            if (posResult != null)
+                return posResult;
+            return $"new {structType}({string.Join(", ", args)})";
+        }
+
+        // Named args
+        if (structExpr.NamedArgs != null)
+        {
+            var namedArgs = AsList(structExpr.NamedArgs.Properties)
+                .Select(p => (p.Name.Text, EmitExpression(p.Value)))
+                .ToList();
+            string? namedResult = _typeProvider.EmitShorthandNamedConstruction(structType, namedArgs);
+            if (namedResult != null)
+                return namedResult;
+            // Generic fallback: object initializer with PascalCase keys
+            string fallbackProps = string.Join(", ",
+                namedArgs.Select(p => $"{KeyConverter.ToPascalCase(p.Item1)} = {p.Item2}"));
+            return $"new {structType}() {{ {fallbackProps} }}";
+        }
+
+        // Zero-value
+        string? zeroResult = _typeProvider.EmitShorthandConstruction(structType, null);
+        if (zeroResult != null)
+            return zeroResult;
+        return $"new {structType}()";
+    }
+
+    private string EmitResourceExpression(ResourceExpressionSyntax resource)
+    {
+        string pathExpr = EmitExpression(resource.Path);
+        return resource.Keyword.Kind switch
+        {
+            SyntaxKind.ImageKeyword => $"Guml.ResourceProvider.LoadImage({pathExpr}, {_currentNodeVar})",
+            SyntaxKind.FontKeyword => $"Guml.ResourceProvider.LoadFont({pathExpr}, {_currentNodeVar})",
+            SyntaxKind.AudioKeyword => $"Guml.ResourceProvider.LoadAudio({pathExpr}, {_currentNodeVar})",
+            SyntaxKind.VideoKeyword => $"Guml.ResourceProvider.LoadVideo({pathExpr}, {_currentNodeVar})",
+            _ => "/* unsupported resource type */"
         };
     }
 
-    /// <summary>
-    /// Emits a new object creation expression with property initializer syntax.
-    /// </summary>
-    private string EmitNewObj(GumlValueNode node)
+    private string EmitObjectLiteral(ObjectLiteralExpressionSyntax objLit)
     {
-        if (node.DictionaryValue == null || node.DictionaryValue.Count == 0)
-            return $"new {node.NewObjTypeName}()";
-
-        string[] props = node.DictionaryValue
-            .Select(kvp => $"{kvp.Key} = {EmitExpression(kvp.Value)}")
+        string[] entries = AsList(objLit.Properties)
+            .Select(p => $"{{ \"{p.Name.Text}\", {EmitExpression(p.Value)} }}")
             .ToArray();
-        return $"new {node.NewObjTypeName}() {{ {string.Join(", ", props)} }}";
+        return $"new System.Collections.Generic.Dictionary<string, object> {{ {string.Join(", ", entries)} }}";
     }
 
-    /// <summary>
-    /// Emits a reference expression (variable/property chain).
-    /// </summary>
-    private string EmitRef(GumlValueNode node)
+    private string EmitNewObj(ObjectCreationExpressionSyntax objCreate)
     {
-        var parts = new List<string>();
-        BuildRefChain(node, parts);
-        return string.Join(".", parts);
+        if (objCreate.Properties.Count == 0)
+            return $"new {objCreate.TypeName.Text}()";
+
+        string[] props = AsList(objCreate.Properties)
+            .Select(p => $"{KeyConverter.ToPascalCase(p.Name.Text)} = {EmitExpression(p.Value)}")
+            .ToArray();
+        return $"new {objCreate.TypeName.Text}() {{ {string.Join(", ", props)} }}";
     }
 
-    /// <summary>
-    /// Recursively builds a reference chain (e.g., $controller.Property.SubProperty).
-    /// </summary>
-    private void BuildRefChain(GumlValueNode node, List<string> parts)
+    private string EmitArrayLiteral(ArrayLiteralExpressionSyntax array)
     {
-        if (node.RefNode != null)
+        string[] elements = AsList(array.Elements).Select(EmitExpression).ToArray();
+        return $"new {array.TypeName.Text}[] {{ {string.Join(", ", elements)} }}";
+    }
+
+    private string EmitDictionaryLiteral(DictionaryLiteralExpressionSyntax dict)
+    {
+        string keyType = dict.KeyType.Text;
+        string valueType = dict.ValueType.Text;
+        string[] entries = AsList(dict.Entries)
+            .Select(e => $"{{ {EmitExpression(e.Key)}, {EmitExpression(e.Value)} }}")
+            .ToArray();
+        return $"new System.Collections.Generic.Dictionary<{keyType}, {valueType}> {{ {string.Join(", ", entries)} }}";
+    }
+
+    private string EmitTemplateString(TemplateStringExpressionSyntax templateStr)
+    {
+        var sb = new StringBuilder();
+        sb.Append("$\"");
+        foreach (var part in templateStr.Parts)
         {
-            BuildRefChain(node.RefNode, parts);
+            switch (part)
+            {
+                case TemplateStringTextSyntax text:
+                    sb.Append(EscapeString(text.TextToken.Text));
+                    break;
+                case TemplateStringInterpolationSyntax interp:
+                    sb.Append('{');
+                    sb.Append(EmitExpression(interp.Expression));
+                    sb.Append('}');
+                    break;
+            }
+        }
+        sb.Append('"');
+        return sb.ToString();
+    }
+
+    // ========================================
+    // Helper methods
+    // ========================================
+
+    /// <summary>
+    /// Emits an expression with enum qualification when applicable.
+    /// </summary>
+    private string EmitExpressionWithEnumQualification(ExpressionSyntax expr,
+        string componentType, string propertyName, CompilationApiScanner? scanner)
+    {
+        if (scanner is { IsAvailable: true } && expr is EnumValueExpressionSyntax enumVal)
+        {
+            var propType = scanner.ResolvePropertyType(componentType, propertyName);
+            if (propType is { TypeKind: Microsoft.CodeAnalysis.TypeKind.Enum })
+            {
+                string enumFullName = propType.ToDisplayString(
+                    Microsoft.CodeAnalysis.SymbolDisplayFormat.FullyQualifiedFormat);
+                return $"{enumFullName}.{enumVal.Token.Text.TrimStart('.')}";
+            }
         }
 
-        switch (node.RefType)
-        {
-            case RefType.GlobalRef:
-                if (node.RefName == "$controller")
-                {
-                    parts.Add("_controller");
-                }
-                else
-                {
-                    // Global refs: Guml.GlobalRefs["$name"]
-                    parts.Add($"Guml.GlobalRefs[\"{node.RefName}\"]");
-                }
-                break;
-
-            case RefType.LocalAliasRef:
-                string aliasName = node.RefName;
-                if (_aliasMap.TryGetValue(aliasName, out string? mappedName))
-                {
-                    parts.Add(mappedName);
-                }
-                else
-                {
-                    parts.Add(aliasName.TrimStart('@'));
-                }
-                break;
-
-            case RefType.LocalRef:
-                // Check if this variable is defined in any enclosing each scope
-                string? foundScopeVar = null;
-                foreach ((string scopeVar, HashSet<string> varNames) in _eachScopeStack)
-                {
-                    if (varNames.Contains(node.RefName))
-                    {
-                        foundScopeVar = scopeVar;
-                        break; // Innermost scope wins
-                    }
-                }
-                if (foundScopeVar != null)
-                {
-                    // Emit EachScope lookup instead of bare variable name
-                    parts.Add($"((dynamic){foundScopeVar}.Lookup(\"{node.RefName}\"))");
-                }
-                else
-                {
-                    // If not found in local scope, check if it's a property on the controller.
-                    // This supports implicit controller property access like { Text: MyProp } instead of { Text: $controller.MyProp }
-                    string propName = node.RefName;
-
-                    // The property name might be camelCase in GUML but PascalCase in C# controller.
-                    // We try to match both or rely on standard conversion.
-                    // Usually GUML identifiers are same case as C# unless strictly enforced otherwise.
-                    // However, standard C# properties are PascalCase.
-
-                    // If we have scanner and controller type, we can check existence.
-                    bool isControllerProp = false;
-                    if (_scanner != null && _activeControllerTypeName != null)
-                    {
-                          // Check exact name or converted PascalCase name
-                          if (_scanner.HasProperty(_activeControllerTypeName, propName))
-                          {
-                              isControllerProp = true;
-                          }
-                          else
-                          {
-                              string pascalName = KeyConverter.ToPascalCase(propName);
-                              if (_scanner.HasProperty(_activeControllerTypeName, pascalName))
-                              {
-                                  propName = pascalName;
-                                  isControllerProp = true;
-                              }
-                          }
-                    } else if (_hasControllerTypeName) {
-                         // Fallback without scanner: assume it is a controller property if we have a controller.
-                         // This is risky for static types like "Math", but "Math" is unlikely to be a valid property name on controller anyway.
-                         // But we should probably prefer PascalCase conversion for properties.
-                         propName = KeyConverter.ToPascalCase(propName);
-                         isControllerProp = true;
-                    }
-
-                    if (isControllerProp)
-                    {
-                        parts.Add($"_controller.{propName}");
-                    }
-                    else
-                    {
-                        parts.Add(node.RefName);
-                    }
-                }
-                break;
-
-            case RefType.PropertyRef:
-                parts.Add(KeyConverter.ToPascalCase(node.RefName));
-                break;
-        }
+        return EmitExpression(expr);
     }
 
     /// <summary>
-    /// Collects controller property names referenced in an expression
-    /// (used to determine which PropertyChanged events to subscribe to).
+    /// Gets the cast expression for a property type, or null if no cast needed.
     /// </summary>
-    private void CollectControllerDependencies(GumlExprNode node, HashSet<string> deps)
+    private static string? GetPropertyCast(string componentType, string propertyName,
+        CompilationApiScanner? scanner)
+    {
+        if (scanner is not { IsAvailable: true })
+            return null;
+
+        var propType = scanner.ResolvePropertyType(componentType, propertyName);
+        if (propType == null)
+            return null;
+
+        return scanner.GetCastExpression(propType);
+    }
+
+    /// <summary>
+    /// Determines if a property should target the imported controller vs the view node.
+    /// </summary>
+    private bool ShouldTargetController(string propName, GumlDocumentSyntax? importedDoc,
+        string importedControllerType, CompilationApiScanner? scanner)
+    {
+        if (importedDoc != null)
+        {
+            // Check aliases
+            string aliasKey = "@" + KeyConverter.ToCamelCase(propName);
+            var aliases = CollectAliases(importedDoc.RootComponent);
+            if (aliases.ContainsKey(aliasKey))
+                return true;
+
+            // Check parameters
+            if (GetParameters(importedDoc.RootComponent)
+                .Any(p => KeyConverter.ToPascalCase(p.Name.Text) == KeyConverter.ToPascalCase(propName)))
+                return true;
+        }
+
+        // Check scanner
+        if (scanner != null && scanner.HasProperty(importedControllerType, propName))
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Generates a unique variable name for a component node.
+    /// </summary>
+    private string GetVariableName(ComponentDeclarationSyntax comp)
+    {
+        if (_varCounter == 0)
+        {
+            _varCounter++;
+            return "root";
+        }
+
+        string baseName;
+        if (_nodeAliasMap.TryGetValue(comp, out var aliasInfo))
+        {
+            baseName = KeyConverter.ToCamelCase(aliasInfo.AliasKey.TrimStart('@'));
+        }
+        else
+        {
+            string typeName = comp.TypeName.Text;
+            baseName = char.ToLowerInvariant(typeName[0]) + typeName.Substring(1);
+        }
+
+        string name = $"{baseName}_{_varCounter}";
+        _varCounter++;
+        return name;
+    }
+
+    /// <summary>
+    /// Collects controller property dependencies from a CST expression.
+    /// </summary>
+    private HashSet<string> CollectControllerDependencies(ExpressionSyntax node)
+    {
+        var deps = new HashSet<string>();
+        CollectDepsRecursive(node, deps);
+        return deps;
+    }
+
+    private void CollectDepsRecursive(ExpressionSyntax node, HashSet<string> deps)
     {
         switch (node)
         {
-            case GumlValueNode valueNode when valueNode.ValueType == GumlValueType.Ref:
-                // Walk the ref chain to find $controller.PropertyName patterns or implicit property refs
-                CollectRefDependencies(valueNode, deps, false);
-                break;
-
-            case GumlStructNode structNode:
-                foreach (var arg in structNode.Args)
+            case MemberAccessExpressionSyntax memberAccess:
+            {
+                var root = GetMemberAccessRoot(memberAccess);
+                if (root is ReferenceExpressionSyntax { Identifier: { Kind: SyntaxKind.GlobalRefToken, Text: "$controller" } })
                 {
-                    CollectControllerDependencies(arg, deps);
+                    string? firstMember = GetFirstMemberName(memberAccess);
+                    if (firstMember != null)
+                        deps.Add(KeyConverter.ToPascalCase(firstMember));
+                }
+                CollectDepsRecursive(memberAccess.Expression, deps);
+                break;
+            }
+
+            case ReferenceExpressionSyntax { Identifier.Kind: SyntaxKind.IdentifierToken } reference:
+            {
+                // Implicit controller property access
+                string name = reference.Identifier.Text;
+                bool isLoopVar = false;
+                foreach ((_, string idxN, string valN, _) in _eachScopeStack)
+                {
+                    if (name == idxN || name == valN)
+                    {
+                        isLoopVar = true;
+                        break;
+                    }
+                }
+
+                if (!isLoopVar)
+                {
+                    string propName = name;
+                    bool isControllerProp = false;
+
+                    if (_scanner != null && _activeControllerTypeName != null)
+                    {
+                        if (_scanner.HasProperty(_activeControllerTypeName, propName))
+                            isControllerProp = true;
+                        else
+                        {
+                            string pascalName = KeyConverter.ToPascalCase(propName);
+                            if (_scanner.HasProperty(_activeControllerTypeName, pascalName))
+                            {
+                                propName = pascalName;
+                                isControllerProp = true;
+                            }
+                        }
+                    }
+                    else if (_hasControllerTypeName)
+                    {
+                        propName = KeyConverter.ToPascalCase(propName);
+                        isControllerProp = true;
+                    }
+
+                    if (isControllerProp)
+                        deps.Add(propName);
                 }
                 break;
+            }
 
-            case InfixOpNode infixNode:
-                CollectControllerDependencies(infixNode.Left, deps);
-                CollectControllerDependencies(infixNode.Right, deps);
+            case BinaryExpressionSyntax binary:
+                CollectDepsRecursive(binary.Left, deps);
+                CollectDepsRecursive(binary.Right, deps);
                 break;
 
-            case PrefixOpNode prefixNode:
-                CollectControllerDependencies(prefixNode.Right, deps);
+            case PrefixUnaryExpressionSyntax prefix:
+                CollectDepsRecursive(prefix.Operand, deps);
+                break;
+
+            case ConditionalExpressionSyntax cond:
+                CollectDepsRecursive(cond.Condition, deps);
+                CollectDepsRecursive(cond.WhenTrue, deps);
+                CollectDepsRecursive(cond.WhenFalse, deps);
+                break;
+
+            case CallExpressionSyntax call:
+                if (call.Expression is ReferenceExpressionSyntax { Identifier.Kind: SyntaxKind.IdentifierToken } callId &&
+                    (callId.Identifier.Text == "tr" || callId.Identifier.Text == "ntr"))
+                    deps.Add("_locale");
+                CollectDepsRecursive(call.Expression, deps);
+                foreach (var arg in call.Arguments)
+                    CollectDepsRecursive(arg, deps);
+                break;
+
+            case StructExpressionSyntax structExpr:
+                if (structExpr.PositionalArgs != null)
+                    foreach (var arg in structExpr.PositionalArgs)
+                        CollectDepsRecursive(arg, deps);
+                if (structExpr.NamedArgs != null)
+                    foreach (var prop in structExpr.NamedArgs.Properties)
+                        CollectDepsRecursive(prop.Value, deps);
+                break;
+
+            case ParenthesizedExpressionSyntax paren:
+                CollectDepsRecursive(paren.Expression, deps);
+                break;
+
+            case TemplateStringExpressionSyntax templateStr:
+                foreach (var part in templateStr.Parts)
+                    if (part is TemplateStringInterpolationSyntax interp)
+                        CollectDepsRecursive(interp.Expression, deps);
+                break;
+
+            case ObjectLiteralExpressionSyntax objLit:
+                foreach (var prop in objLit.Properties)
+                    CollectDepsRecursive(prop.Value, deps);
+                break;
+
+            case ObjectCreationExpressionSyntax objCreate:
+                foreach (var prop in objCreate.Properties)
+                    CollectDepsRecursive(prop.Value, deps);
+                break;
+
+            case ResourceExpressionSyntax resource:
+                CollectDepsRecursive(resource.Path, deps);
+                break;
+
+            case ArrayLiteralExpressionSyntax array:
+                foreach (var elem in array.Elements)
+                    CollectDepsRecursive(elem, deps);
+                break;
+
+            case DictionaryLiteralExpressionSyntax dict:
+                foreach (var entry in dict.Entries)
+                {
+                    CollectDepsRecursive(entry.Key, deps);
+                    CollectDepsRecursive(entry.Value, deps);
+                }
                 break;
         }
     }
 
-    /// <summary>
-    /// Walks a reference chain to find direct controller property dependencies.
-    /// Only the first property after $controller is tracked (e.g., $controller.Foo.Bar tracks "Foo").
-    /// </summary>
-    private void CollectRefDependencies(GumlValueNode node, HashSet<string> deps, bool isControllerChild)
+    private static ExpressionSyntax GetMemberAccessRoot(MemberAccessExpressionSyntax memberAccess)
     {
-        // If my parent in the ref chain is $controller, then I am a controller property
-        if (isControllerChild && node.RefType == RefType.PropertyRef)
+        ExpressionSyntax current = memberAccess;
+        while (current is MemberAccessExpressionSyntax m)
+            current = m.Expression;
+        return current;
+    }
+
+    private static string? GetFirstMemberName(MemberAccessExpressionSyntax memberAccess)
+    {
+        if (memberAccess.Expression is MemberAccessExpressionSyntax inner)
+            return GetFirstMemberName(inner);
+        return memberAccess.Name.Text;
+    }
+
+    // ========================================
+    // Static helper methods
+    // ========================================
+
+    /// <summary>
+    /// Collects all alias declarations from a component tree recursively.
+    /// </summary>
+    internal static Dictionary<string, ComponentDeclarationSyntax> CollectAliases(
+        ComponentDeclarationSyntax root)
+    {
+        var aliases = new Dictionary<string, ComponentDeclarationSyntax>();
+        CollectAliasesRecursive(root, aliases);
+        return aliases;
+    }
+
+    private static void CollectAliasesRecursive(ComponentDeclarationSyntax comp,
+        Dictionary<string, ComponentDeclarationSyntax> aliases)
+    {
+        foreach (var member in comp.Members)
         {
-            deps.Add(KeyConverter.ToPascalCase(node.RefName));
-            return; // Only track the first-level property
-        }
-
-        // Implicit controller property access (bare Identifier that isn't a loop variable)
-        if (node.RefType == RefType.LocalRef)
-        {
-             bool isLoopVar = false;
-             foreach ((string _, HashSet<string> varNames) in _eachScopeStack)
-             {
-                 if (varNames.Contains(node.RefName))
-                 {
-                     isLoopVar = true;
-                     break;
-                 }
-             }
-
-             if (!isLoopVar)
-             {
-                 string propName = node.RefName;
-                 bool isControllerProp = false;
-
-                 if (_scanner != null && _activeControllerTypeName != null)
-                 {
-                      if (_scanner.HasProperty(_activeControllerTypeName, propName))
-                      {
-                          isControllerProp = true;
-                      }
-                      else
-                      {
-                          string pascalName = KeyConverter.ToPascalCase(propName);
-                          if (_scanner.HasProperty(_activeControllerTypeName, pascalName))
-                          {
-                              propName = pascalName;
-                              isControllerProp = true;
-                          }
-                      }
-                 }
-                 else if (_hasControllerTypeName)
-                 {
-                     propName = KeyConverter.ToPascalCase(propName);
-                     isControllerProp = true;
-                 }
-
-                 if (isControllerProp)
-                 {
-                     deps.Add(propName);
-                 }
-             }
-        }
-
-        if (node.RefNode != null)
-        {
-            bool parentIsController = node.RefNode.RefType == RefType.GlobalRef &&
-                                      node.RefNode.RefName == "$controller";
-            // Recurse into the parent ref first
-            CollectRefDependencies(node.RefNode, deps, parentIsController);
-            // If parent is $controller and current node is a property ref, add it
-            if (parentIsController && node.RefType == RefType.PropertyRef)
+            if (member is ComponentDeclarationSyntax child)
             {
-                deps.Add(KeyConverter.ToPascalCase(node.RefName));
+                if (child.AliasPrefix != null)
+                {
+                    aliases[child.AliasPrefix.AliasRef.Text] = child;
+                }
+                CollectAliasesRecursive(child, aliases);
+            }
+            else if (member is EachBlockSyntax { Body: not null } each)
+            {
+                foreach (var bodyMember in each.Body)
+                {
+                    if (bodyMember is ComponentDeclarationSyntax eachChild)
+                    {
+                        if (eachChild.AliasPrefix != null)
+                        {
+                            aliases[eachChild.AliasPrefix.AliasRef.Text] = eachChild;
+                        }
+                        CollectAliasesRecursive(eachChild, aliases);
+                    }
+                }
             }
         }
     }
 
     /// <summary>
-    /// Resolves parent directory references (..) in a path string.
-    /// Example: "a/b/../c" -> "a/c"
+    /// Gets parameter declarations from a component's members.
     /// </summary>
-    private static string ResolveRelativePath(string path)
+    internal static IEnumerable<ParameterDeclarationSyntax> GetParameters(
+        ComponentDeclarationSyntax comp)
     {
-        var parts = path.Replace('\\', '/').Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-        var stack = new Stack<string>();
-
-        foreach (var part in parts)
-        {
-            if (part == ".") continue;
-            if (part == "..")
-            {
-                if (stack.Count > 0) stack.Pop();
-                continue;
-            }
-            stack.Push(part);
-        }
-
-        // Reconstruct path
-        var result = string.Join("/", stack.Reverse());
+        var result = new List<ParameterDeclarationSyntax>();
+        foreach (var member in comp.Members)
+            if (member is ParameterDeclarationSyntax param)
+                result.Add(param);
         return result;
+    }
+
+    /// <summary>
+    /// Gets event declarations from a component's members.
+    /// </summary>
+    internal static IEnumerable<EventDeclarationSyntax> GetEvents(
+        ComponentDeclarationSyntax comp)
+    {
+        var result = new List<EventDeclarationSyntax>();
+        foreach (var member in comp.Members)
+            if (member is EventDeclarationSyntax evt)
+                result.Add(evt);
+        return result;
+    }
+
+    /// <summary>
+    /// Extracts the file name (without extension) from an import directive.
+    /// </summary>
+    internal static string GetImportFileName(ImportDirectiveSyntax import)
+    {
+        string path = StripQuotes(import.Path.Text); // e.g. "panel/setting"
+        string fileName = path.Replace('\\', '/').TrimEnd('/');
+        int lastSlash = fileName.LastIndexOf('/');
+        if (lastSlash >= 0) fileName = fileName.Substring(lastSlash + 1);
+        if (fileName.EndsWith(".guml", StringComparison.OrdinalIgnoreCase))
+            fileName = fileName.Substring(0, fileName.Length - 5);
+        return fileName;
+    }
+
+    /// <summary>
+    /// Recursively collects namespaces of all component types referenced in the document
+    /// that can be resolved by the <see cref="CompilationApiScanner"/>.
+    /// Imported components are skipped (their controller namespaces are resolved separately).
+    /// </summary>
+    private static void CollectComponentNamespaces(
+        ComponentDeclarationSyntax comp,
+        GumlDocumentSyntax doc,
+        CompilationApiScanner scanner,
+        HashSet<string> namespaces)
+    {
+        string typeName = comp.TypeName.Text;
+
+        // Skip imported components (their namespaces are handled separately)
+        bool isImported = false;
+        foreach (var import in doc.Imports)
+        {
+            string importFileName = GetImportFileName(import);
+            string nameInGuml = import.Alias != null
+                ? import.Alias.Name.Text
+                : KeyConverter.ToPascalCase(importFileName);
+            if (nameInGuml == typeName)
+            {
+                isImported = true;
+                break;
+            }
+        }
+
+        if (!isImported)
+        {
+            string? ns = scanner.ResolveComponentNamespace(typeName);
+            if (ns != null)
+                namespaces.Add(ns);
+        }
+
+        // Recurse into children
+        foreach (var member in comp.Members)
+        {
+            if (member is ComponentDeclarationSyntax child)
+                CollectComponentNamespaces(child, doc, scanner, namespaces);
+            else if (member is EachBlockSyntax each && each.Body != null)
+            {
+                foreach (var bodyChild in each.Body)
+                {
+                    if (bodyChild is ComponentDeclarationSyntax eachChild)
+                        CollectComponentNamespaces(eachChild, doc, scanner, namespaces);
+                }
+            }
+            else if (member is TemplateParamAssignmentSyntax templateParam)
+                CollectComponentNamespaces(templateParam.Component, doc, scanner, namespaces);
+        }
+    }
+
+    // ========================================
+    // Collection conversion helpers
+    // ========================================
+
+    /// <summary>
+    /// Converts a SyntaxList to a standard List for LINQ compatibility.
+    /// </summary>
+    private static List<T> AsList<T>(SyntaxList<T> source) where T : SyntaxNode
+    {
+        var list = new List<T>(source.Count);
+        foreach (var item in source)
+            list.Add(item);
+        return list;
+    }
+
+    /// <summary>
+    /// Converts a SeparatedSyntaxList to a standard List for LINQ compatibility.
+    /// </summary>
+    private static List<T> AsList<T>(SeparatedSyntaxList<T> source) where T : SyntaxNode
+    {
+        var list = new List<T>(source.Count);
+        foreach (var item in source)
+            list.Add(item);
+        return list;
+    }
+
+    /// <summary>
+    /// Strips surrounding quotes from a string literal token text.
+    /// </summary>
+    internal static string StripQuotes(string text)
+    {
+        // ReSharper disable once MergeIntoPattern
+        if (text.Length >= 2 && text[0] == '"' && text[text.Length - 1] == '"')
+            return text.Substring(1, text.Length - 2);
+        return text;
     }
 
     /// <summary>

@@ -5,16 +5,12 @@
     <Nullable>enable</Nullable>
 
     <PackageId>GUML</PackageId>
-    <PackageVersion>0.0.4</PackageVersion>
-    <Authors>shitake233</Authors>
+    <PackageVersion>0.3.0</PackageVersion>
     <Description>Godot UI Markup Language.</Description>
     <PackageProjectUrl>https://www.nuget.org/packages/GUML</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <RepositoryUrl>https://github.com/molingyu/GUML</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
     <PackageTags>Godot</PackageTags>
     <PackageReleaseNotes>The initial release of the GUML nuget package.</PackageReleaseNotes>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
 
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
@@ -28,6 +24,6 @@
     <PackageReference Include="GodotSharp" Version="4.2.2" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\RegexTokenizeGenerator\RegexTokenizeGenerator.csproj" />
+    <ProjectReference Include="..\GUML.Shared\GUML.Shared.csproj" />
   </ItemGroup>
 </Project>

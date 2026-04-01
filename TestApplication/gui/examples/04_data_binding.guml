@@ -1,0 +1,87 @@
+// ============================================================
+// 04 - Data Binding (§8.2, §8.3)
+// Demo: static assignment (:)  one-way (:=)  reverse (=:)
+// ============================================================
+VBoxContainer {
+    size_flags_horizontal: .Fill
+
+    // --- Controls panel ---
+    Label {
+        text: "―― Controls ――",
+        horizontal_alignment: .Center,
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    // Reverse binding: LineEdit.text writes back to $controller.user_name on change
+    // Any input immediately refreshes all bindings that reference user_name
+    HBoxContainer {
+        Label { text: "Name", custom_minimum_size: vec2(48, 0) }
+        LineEdit {
+            placeholder_text: "Type name here...",
+            size_flags_horizontal: .Fill,
+            text =: $controller.user_name
+        }
+    }
+
+    // Score stepper
+    HBoxContainer {
+        Label { text: "Score", custom_minimum_size: vec2(48, 0) }
+        Button { text: "-5", #pressed: $controller.dec_score }
+        Label {
+            text := $"{$controller.score}",
+            custom_minimum_size: vec2(32, 0),
+            horizontal_alignment: .Center
+        }
+        Button { text: "+5", #pressed: $controller.inc_score }
+    }
+
+    // Health slider
+    HBoxContainer {
+        Label { text: "Health", custom_minimum_size: vec2(48, 0) }
+        HSlider {
+            min_value: 0, max_value: 100, step: 1, value: 75,
+            size_flags_horizontal: .Fill,
+            #value_changed: $controller.on_health_changed
+        }
+    }
+
+    // --- §8.2 Static assignment (:) — evaluated once at load time ---
+    Label {
+        text: "―― Static (:) ――",
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+    Label {
+        text: "This is static text",
+        horizontal_alignment: .Center
+    }
+
+    // --- §8.3.1 One-way binding (:=) — auto-refreshed when controller changes ---
+    Label {
+        text: "―― One-way (:=) ――",
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    // One-way display: refreshes instantly after the LineEdit reverse-binding updates user_name
+    Label { text := $controller.user_name }
+    Label { text := $"Welcome, {$controller.user_name}!" }
+    Label {
+        text := $"Score: {$controller.score} / {$controller.max_score}",
+        tooltip_text := $"Percentage: {$controller.score * 100 / $controller.max_score}%"
+    }
+
+    // Health bar: green above 50, red below
+    ProgressBar {
+        min_value: 0, max_value: 100,
+        value := $controller.health,
+        modulate := $controller.health > 50 ? color(0, 1, 0, 1) : color(1, 0.2, 0.2, 1)
+    }
+    Label {
+        text := $"HP: {$controller.health:.0f} / 100  — {$controller.health > 50 ? "Healthy" : "Low HP!"}",
+        modulate := $controller.health > 50 ? color(0.4, 1.0, 0.4, 1.0) : color(1.0, 0.4, 0.4, 1.0)
+    }
+
+    // Method call binding — re-evaluated whenever referenced properties change
+    Label {
+        text := $controller.format_display($controller.first_name, $controller.last_name)
+    }
+}

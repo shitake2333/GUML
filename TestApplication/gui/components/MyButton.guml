@@ -1,0 +1,27 @@
+// ============================================================
+// Reusable component — MyButton (§8.6, §8.7)
+// Defines params and events for parent components
+// ============================================================
+/// my_button
+/// Reusable button component with params and events
+Button {
+
+    // --- §8.6 Parameter declarations (root component only) ---
+    /// main text displayed on the button
+    param string button_text : "Default"
+    /// mouse hover tooltip text
+    param string tooltip_text : ""
+    /// primary style when true
+    param bool is_primary : false
+    // --- §8.7 Event declarations (root component only) ---
+    /// button click event (no arguments)
+    event on_clicked // no-argument event
+    /// long press event with duration argument
+    event on_long_pressed(float duration) // event with duration argument
+    // Access this component's params via $root (§9.3.1)
+    text: $root.button_text,
+    tooltip_text: $root.tooltip_text,
+    #pressed: $root.on_clicked,
+    modulate: $root.is_primary ? color(0.2, 0.6, 1.0, 1.0) : color(1.0, 1.0, 1.0, 1.0)
+}
+

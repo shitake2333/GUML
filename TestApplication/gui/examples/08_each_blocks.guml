@@ -1,0 +1,81 @@
+// ============================================================
+// 08 - Each Blocks (§8.8)
+// Demo: block form, nested rules, dynamic add/remove
+// ============================================================
+VBoxContainer {
+    size_flags_horizontal: .Fill
+
+    // --- Dynamic list: each + add/remove buttons ---
+    HBoxContainer {
+        Label {
+            text := $"Items ({$controller.item_count}):",
+            size_flags_horizontal: .Fill
+        }
+        Button {
+            text: "+ Add",
+            #pressed: $controller.add_item
+        }
+        Button {
+            text: "- Remove",
+            disabled := $controller.item_count == 0,
+            #pressed: $controller.remove_item
+        }
+    }
+
+    // --- §8.8 Block form: each source { |index, value| ... } ---
+    each $controller.items { |idx, item|
+        HBoxContainer {
+            Label {
+                text := $"{idx + 1}. {item.name}",
+                size_flags_horizontal: .Fill
+            }
+            Label {
+                text := $"x{item.qty}",
+                modulate: color(0.7, 0.9, 0.7, 1.0)
+            }
+        }
+    }
+
+    // --- User list + toggle active state ---
+    Label {
+        text: "── User List ──",
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    each $controller.users { |i, user|
+        HBoxContainer {
+            Label {
+                text := $"{i + 1}. {user.name}",
+                size_flags_horizontal: .Fill,
+                modulate := user.is_active ? color(1, 1, 1, 1) : color(0.5, 0.5, 0.5, 1)
+            }
+            Label {
+                text := user.is_active ? "Active" : "Inactive",
+                modulate := user.is_active ? color(0.3, 1.0, 0.3, 1.0) : color(1.0, 0.4, 0.4, 1.0),
+                custom_minimum_size: vec2(56, 0)
+            }
+            Button {
+                text: "Toggle",
+                #pressed: $controller.toggle_user(user.id)
+            }
+        }
+    }
+
+    // --- §8.8.1 Nested each — requires an intermediate component ---
+    Label {
+        text: "── Nested Each (matrix) ──",
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    each $controller.rows { |row_idx, row|
+        HBoxContainer {
+            each row.items { |col_idx, cell|
+                Label {
+                    text: cell.display,
+                    custom_minimum_size: vec2(36, 24),
+                    horizontal_alignment: .Center
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,23 @@
+// ============================================================
+// 可复用组件 — SearchBar (§8.6, §8.7)
+// ============================================================
+
+HBoxContainer {
+    param string placeholder: "Search..."
+    param string initial_query: ""
+
+    event on_search(string query)
+    event on_clear
+
+    @search_field: LineEdit {
+        placeholder_text: $root.placeholder,
+        text: $root.initial_query,
+        size_flags_horizontal: .Fill
+    }
+
+
+    Button {
+        text: "Clear",
+        #pressed: $root.on_clear
+    }
+}

@@ -8,19 +8,17 @@
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 
     <PackageId>GUML.SourceGenerator</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>shitake233</Authors>
+    <Version>0.3.0</Version>
     <Description>Roslyn incremental source generator that compiles .guml files into strongly-typed C# view classes at build time.</Description>
-    <PackageProjectUrl>https://github.com/molingyu/GUML</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/molingyu/GUML</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/shitake2333/GUML</PackageProjectUrl>
     <PackageTags>Godot GUML SourceGenerator Roslyn</PackageTags>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
 
     <!-- Source generator packaging -->
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IsRoslynComponent>true</IsRoslynComponent>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -43,13 +41,11 @@
     <None Include="build\**" Pack="true" PackagePath="build" />
   </ItemGroup>
 
-  <!-- Reference GUML.Shared for DTO types (GumlApiCache etc.) -->
+  <!-- Reference GUML.Shared for shared syntax and API types -->
   <ItemGroup>
     <ProjectReference Include="..\GUML.Shared\GUML.Shared.csproj"
                       GeneratePathProperty="true"
                       PrivateAssets="all" />
   </ItemGroup>
-
-
 
 </Project>

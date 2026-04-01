@@ -1,0 +1,54 @@
+import "./button.guml" as MyButton;
+import "./actor_list.guml" as ActorList;
+
+Panel {
+    size: vec2(640, 480),
+    theme_overrides: {
+        panel: style_box_flat({
+            bg_color: color(0.6, 0.6, 0.4, 0.4)
+        })
+    },
+
+    @hello: Label {
+        position: vec2(10, 10),
+        size: vec2(200, 30),
+        text:= "hello " + $controller.say_hello
+    }
+
+    each({cache: 5}) $controller.buttons { | index, btn |
+        MyButton {
+            position: vec2(10, 50) + vec2(0, 40) * index,
+            size: vec2(200, 30),
+            text: btn.text,
+            #pressed: btn.pressed
+        }
+    }
+
+    ActorList {
+        position: vec2(300, 50),
+        size: vec2(200, 300),
+        actors: $controller.actors,
+        actor_template: { | index, actor |
+            Panel {
+                size: vec2(200, 30),
+                theme_overrides: {
+                    panel: style_box_flat({
+                        bg_color: color(0.4, 0.6, 0.6, 0.4)
+                    })
+                },
+                Label {
+                    position: vec2(5, 5),
+                    size: vec2(190, 20),
+                    text: actor.name
+                }
+            }
+        }
+    }
+
+    // A comment line
+    TextureRect {
+        position: vec2(10, 100),
+        visible: true,
+        stretch_mode: 1
+    }
+}

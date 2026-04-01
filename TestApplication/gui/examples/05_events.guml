@@ -1,0 +1,74 @@
+// ============================================================
+// 05 - Event Subscriptions (§8.4)
+// Demo: # event reference, Godot signals, custom events
+// ============================================================
+
+VBoxContainer {
+    size_flags_horizontal: .Fill
+
+    // --- Event log: shows the most recently fired event ---
+    Label {
+        text: "―― Event Log ――",
+        horizontal_alignment: .Center,
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+    Label {
+        text := $controller.last_event,
+        horizontal_alignment: .Center,
+        modulate: color(0.4, 1.0, 0.5, 1.0),
+        custom_minimum_size: vec2(0, 28)
+    }
+
+    // --- Godot built-in signal subscription ---
+    // #event_ref: handler_expression
+    HBoxContainer {
+        Button {
+            text := $"Pressed ({$controller.press_count})",
+            size_flags_horizontal: .Fill,
+            #pressed: $controller.on_button_pressed
+        }
+
+        // CheckButton fires #toggled(bool) with the new state
+        CheckButton {
+            text: "Toggle",
+            #toggled: $controller.on_toggle_changed
+        }
+    }
+
+    // --- Multiple event subscriptions ---
+    Button {
+        text: "Press & Hold (button_down / button_up)",
+        size_flags_horizontal: .Fill,
+        #pressed: $controller.on_submit,
+        #button_down: $controller.on_press_start,
+        #button_up: $controller.on_press_end
+    }
+
+    // --- LineEdit signals: show live input content ---
+    LineEdit {
+        placeholder_text: "Type here (text_changed + text_submitted)...",
+        size_flags_horizontal: .Fill,
+        #text_changed: $controller.on_text_changed,
+        #text_submitted: $controller.on_text_submitted
+    }
+    Label {
+        text := $"Typed: \"{$controller.typed_text}\"",
+        modulate: color(0.7, 0.7, 0.7, 1.0)
+    }
+
+    // --- Mixed event + property binding ---
+    @search_input: LineEdit {
+        placeholder_text: "Search (alias @search_input + event)...",
+        size_flags_horizontal: .Fill,
+        text := $controller.search_query,
+        #text_changed: $controller.on_search
+    }
+
+    // --- Event with method-call expression: button passes an argument ---
+    Button {
+        text := $"Delete item #{$controller.selected_id}",
+        size_flags_horizontal: .Fill,
+        modulate: color(1.0, 0.4, 0.4, 1.0),
+        #pressed: $controller.confirm_delete($controller.selected_id)
+    }
+}

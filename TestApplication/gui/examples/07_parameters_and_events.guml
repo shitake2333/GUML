@@ -1,0 +1,96 @@
+// ============================================================
+// 07 - Parameters & Events (§8.6, §8.7)
+// Demo: param required/optional, event with/without arguments
+// ============================================================
+
+// This file IS a reusable component. When imported by a parent,
+// params are set by the parent and events bubble up.
+PanelContainer {
+    size_flags_horizontal: .Fill
+
+    // --- §8.6 Parameter declarations ---
+
+    // Optional params — have default values, parent can override
+    param string title: "Demo Component"
+    param string subtitle: "A reusable panel with params & events"
+    param int count: 0
+    param boolean show_footer: true
+
+    // Optional param with := binding for default
+    param float opacity := 1.0
+
+    // --- §8.7 Event declarations ---
+
+    // No-argument events
+    event on_submit
+    event on_cancel
+
+    // Events with arguments
+    event on_changed(string new_value)
+    event on_count_changed(int new_count)
+
+    // --- Component body ---
+    VBoxContainer {
+        // Access params via $root
+        Label {
+            text: $root.title,
+            label_settings: new LabelSettings { font_size: 18 }
+        }
+
+        Label {
+            text: $root.subtitle,
+            visible: $root.subtitle != "",
+            modulate: color(0.7, 0.7, 0.7, 1.0)
+        }
+
+        Label {
+            text := $"External count param: {$root.count}",
+            visible: $root.count > 0
+        }
+
+        // Internal counter — managed by this component’s own controller
+        Label {
+            text: "Internal counter:",
+            modulate: color(0.5, 0.9, 1.0, 1.0)
+        }
+        HBoxContainer {
+            Button {
+                text: "-",
+                disabled := $controller.item_count == 0,
+                #pressed: $controller.decrement
+            }
+            Label {
+                text := $"{$controller.item_count}",
+                custom_minimum_size: vec2(36, 0),
+                horizontal_alignment: .Center
+            }
+            Button { text: "+", #pressed: $controller.increment }
+        }
+
+        LineEdit {
+            placeholder_text: "Enter value (fires on_changed)...",
+            size_flags_horizontal: .Fill,
+            #text_changed: $controller.on_value_changed
+        }
+
+        Label {
+            text := $controller.status,
+            modulate: color(0.4, 1.0, 0.5, 1.0)
+        }
+
+        HBoxContainer {
+            visible: $root.show_footer
+
+            Button {
+                text: "Submit",
+                size_flags_horizontal: .Fill,
+                #pressed: $controller.on_submit_pressed
+            }
+            Button {
+                text: "Cancel",
+                modulate: color(1.0, 0.5, 0.5, 1.0),
+                #pressed: $controller.on_cancel_pressed
+            }
+        }
+    }
+}

@@ -1,0 +1,56 @@
+// ============================================================
+// 06 - Import Directive (§7.1)
+// Demo: import other .guml files, as alias
+// ============================================================
+// Import reusable components
+import "../components/MyButton.guml" as MyButton
+import "../components/SearchBar.guml" as Search
+
+VBoxContainer {
+    size_flags_horizontal: .Fill
+
+    Label {
+        text: "Import Directive Demo",
+        horizontal_alignment: .Center
+    }
+
+    // Use imported MyButton — pass parameters
+    MyButton {
+        button_text: "Primary Action",
+        is_primary: true,
+        #on_clicked: $controller.on_primary_action
+    }
+    MyButton {
+        button_text: "Secondary",
+        tooltip_text: "This is a secondary action",
+        #on_clicked: $controller.on_secondary_action
+    }
+
+    // Use imported component with alias
+    Search {
+        placeholder: "Search items...",
+        #on_search: $controller.handle_search,
+        #on_clear: $controller.clear_search
+    }
+
+    // Required params must be provided — below shows optional param with default
+    MyButton {}
+
+    // --- Output panel: shows the most recently triggered action ---
+    Label {
+        text: "―― Last Action ――",
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+    Label {
+        text := $controller.last_action,
+        horizontal_alignment: .Center,
+        modulate: color(0.4, 1.0, 0.5, 1.0),
+        custom_minimum_size: vec2(0, 24)
+    }
+    Label {
+        text := $"Action count: {$controller.action_count}",
+        horizontal_alignment: .Center,
+        modulate: color(0.7, 0.7, 0.7, 1.0)
+    }
+}
+

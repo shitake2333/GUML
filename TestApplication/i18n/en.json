@@ -1,0 +1,9 @@
+{
+    "Hello World!": "Hello World!",
+    "Hello, {name}!": "Hello, {name}!",
+    "adjective|New": "New (adj.)",
+    "verb|New": "New (create)",
+    "One item": "One item",
+    "{count} items": "{count} items",
+    "Role": "Role"
+}

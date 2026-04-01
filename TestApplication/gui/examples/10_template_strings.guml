@@ -1,0 +1,75 @@
+// ============================================================
+// 10 - Template Strings (§3.6.3.5)
+// Demo: $"..." interpolation, escaping, template strings in bindings
+// ============================================================
+
+VBoxContainer {
+    size_flags_horizontal: .Fill
+
+    // --- Live controls ---
+    Label {
+        text: "── Controls ──",
+        horizontal_alignment: .Center,
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    // Name input (reverse binding: -> $controller.user_name)
+    HBoxContainer {
+        Label { text: "Name", custom_minimum_size: vec2(48, 0) }
+        LineEdit {
+            placeholder_text: "Enter name...",
+            size_flags_horizontal: .Fill,
+            text =: $controller.user_name
+        }
+    }
+
+    // Score stepper
+    HBoxContainer {
+        Label { text: "Score", custom_minimum_size: vec2(48, 0) }
+        Button { text: "-", #pressed: $controller.dec_score }
+        Label {
+            text := $"{$controller.score}",
+            custom_minimum_size: vec2(32, 0),
+            horizontal_alignment: .Center
+        }
+        Button { text: "+", #pressed: $controller.inc_score }
+    }
+
+    // --- §3.6.3.5 Template String Demo ---
+    Label {
+        text: "── Template String Results ──",
+        modulate: color(0.5, 0.9, 1.0, 1.0)
+    }
+
+    // Basic interpolation
+    Label { text := $"Hello, {$controller.user_name}!" }
+
+    // Multiple expressions in one string
+    Label { text := $"Score: {$controller.score} / {$controller.max_score}" }
+
+    // Arithmetic inside interpolation
+    Label { text := $"Total: {$controller.price * $controller.quantity:.2f}" }
+
+    // Ternary inside interpolation
+    Label {
+        text := $"Status: {$controller.is_online ? "Online" : "Offline"}",
+        modulate := $controller.is_online ? color(0.3, 1.0, 0.3, 1.0) : color(1.0, 0.4, 0.4, 1.0)
+    }
+
+    // Method call inside interpolation
+    Label { text := $"Date: {$controller.format_date($controller.created_at)}" }
+
+    // Escape braces: {{ → {  }} → }
+    Label { text: $"Literal braces: {{score}} = {$controller.score}" }
+
+    // All references in one binding — any change re-evaluates the whole string
+    Label {
+        text := $"{$controller.first_name} {$controller.last_name} | ID: {$controller.user_id}"
+    }
+
+    // Multi-value player HUD
+    Label {
+        text := $"Player: {$controller.player_name}  HP: {$controller.health}/{$controller.max_health}  Lv.{$controller.level}",
+        modulate := $controller.health > 50 ? color(1, 1, 1, 1) : color(1.0, 0.5, 0.5, 1.0)
+    }
+}

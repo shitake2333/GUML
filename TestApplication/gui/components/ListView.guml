@@ -1,0 +1,18 @@
+// ============================================================
+// Reusable component — ListView (§8.8 projection form)
+// Content projection via template_param
+// ============================================================
+
+ScrollContainer {
+    param IEnumerable items
+    param Node item_template
+
+    size_flags_vertical: .Fill,
+    size_flags_horizontal: .Fill
+
+    VBoxContainer {
+        size_flags_horizontal: .Fill
+        // Projection form: each source => template_param_name
+        each $root.items => item_template
+    }
+}

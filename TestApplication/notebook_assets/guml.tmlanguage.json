@@ -1,0 +1,595 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "GUML",
+    "scopeName": "source.guml",
+    "patterns": [
+        {
+            "include": "#comment"
+        },
+        {
+            "include": "#import-directive"
+        },
+        {
+            "include": "#component-declaration"
+        }
+    ],
+    "repository": {
+        "comment": {
+            "patterns": [
+                {
+                    "name": "comment.line.documentation.guml",
+                    "match": "///.*$"
+                },
+                {
+                    "name": "comment.line.double-slash.guml",
+                    "match": "//.*$"
+                }
+            ]
+        },
+        "import-directive": {
+            "match": "\\b(import)\\s+(\"[^\"]*\")(?:\\s+(as)\\s+([A-Z][a-zA-Z0-9_]*|[a-z_][a-zA-Z0-9_]*))?",
+            "captures": {
+                "1": {
+                    "name": "keyword.control.import.guml"
+                },
+                "2": {
+                    "name": "string.quoted.double.guml"
+                },
+                "3": {
+                    "name": "keyword.control.as.guml"
+                },
+                "4": {
+                    "name": "entity.name.type.guml"
+                }
+            }
+        },
+        "component-declaration": {
+            "begin": "(@[a-zA-Z_][a-zA-Z0-9_]*\\s*:\\s*)?([A-Z][a-zA-Z0-9_]*)\\s*(\\{)",
+            "beginCaptures": {
+                "1": {
+                    "patterns": [
+                        {
+                            "include": "#alias-ref"
+                        }
+                    ]
+                },
+                "2": {
+                    "name": "entity.name.type.class.guml"
+                },
+                "3": {
+                    "name": "punctuation.definition.block.begin.guml"
+                }
+            },
+            "end": "(\\})",
+            "endCaptures": {
+                "1": {
+                    "name": "punctuation.definition.block.end.guml"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#comment"
+                },
+                {
+                    "include": "#parameter-declaration"
+                },
+                {
+                    "include": "#event-declaration"
+                },
+                {
+                    "include": "#each-block"
+                },
+                {
+                    "include": "#event-subscription"
+                },
+                {
+                    "include": "#mapping-assignment"
+                },
+                {
+                    "include": "#template-param-assignment"
+                },
+                {
+                    "include": "#property-assignment"
+                },
+                {
+                    "include": "#component-declaration"
+                }
+            ]
+        },
+        "parameter-declaration": {
+            "begin": "\\b(param)\\s+([A-Z][a-zA-Z0-9_]*|[a-z_][a-zA-Z0-9_]*)\\s+([a-z_][a-zA-Z0-9_]*)",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.other.param.guml"
+                },
+                "2": {
+                    "name": "entity.name.type.guml"
+                },
+                "3": {
+                    "name": "variable.parameter.guml"
+                }
+            },
+            "end": "(?=[,\\}\\n])",
+            "patterns": [
+                {
+                    "include": "#comment"
+                },
+                {
+                    "match": ":=|:",
+                    "name": "keyword.operator.assignment.guml"
+                },
+                {
+                    "include": "#expression"
+                }
+            ]
+        },
+        "event-declaration": {
+            "begin": "\\b(event)\\s+([a-z_][a-zA-Z0-9_]*)",
+            "beginCaptures": {
+                "1": {
+                    "name": "keyword.other.event.guml"
+                },
+                "2": {
+                    "name": "entity.name.function.event.guml"
+                }
+            },
+            "end": "(?=[,\\}\\n])|(?<=\\))",
+            "patterns": [
+                {
+                    "include": "#comment"
+                },
+                {
+                    "begin": "(\\()",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "punctuation.section.parameters.begin.guml"
+                        }
+                    },
+                    "end": "(\\))",
+                    "endCaptures": {
+                        "1": {
+                            "name": "punctuation.section.parameters.end.guml"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "match": "([A-Z][a-zA-Z0-9_]*|[a-z_][a-zA-Z0-9_]*)\\s+([a-z_][a-zA-Z0-9_]*)",
+                            "captures": {
+                                "1": {
+                                    "name": "entity.name.type.guml"
+                                },
+                                "2": {
+                                    "name": "variable.parameter.guml"
+                                }
+                            }
+                        },
+                        {
+                            "match": ",",
+                            "name": "punctuation.separator.comma.guml"
+                        }
+                    ]
+                }
+            ]
+        },
+        "each-block": {
+            "patterns": [
+                {
+                    "comment": "Projection form: each expr => name",
+                    "match": "\\b(each)\\b\\s+(.+?)\\s*(=>)\\s*([a-z_][a-zA-Z0-9_]*)",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.control.each.guml"
+                        },
+                        "2": {
+                            "patterns": [
+                                {
+                                    "include": "#expression"
+                                }
+                            ]
+                        },
+                        "3": {
+                            "name": "keyword.operator.fat-arrow.guml"
+                        },
+                        "4": {
+                            "name": "variable.other.guml"
+                        }
+                    }
+                },
+                {
+                    "comment": "Block form: each [params] expr { |vars| body }",
+                    "begin": "\\b(each)\\b",
+                    "beginCaptures": {
+                        "1": {
+                            "name": "keyword.control.each.guml"
+                        }
+                    },
+                    "end": "\\}",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.definition.block.end.guml"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#comment"
+                        },
+                        {
+                            "include": "#pipe-variables"
+                        },
+                        {
+                            "include": "#each-block"
+                        },
+                        {
+                            "include": "#event-subscription"
+                        },
+                        {
+                            "include": "#mapping-assignment"
+                        },
+                        {
+                            "include": "#template-param-assignment"
+                        },
+                        {
+                            "include": "#property-assignment"
+                        },
+                        {
+                            "include": "#component-declaration"
+                        },
+                        {
+                            "include": "#expression"
+                        }
+                    ]
+                }
+            ]
+        },
+        "pipe-variables": {
+            "begin": "(\\|)",
+            "beginCaptures": {
+                "1": {
+                    "name": "punctuation.separator.pipe.guml"
+                }
+            },
+            "end": "(\\|)",
+            "endCaptures": {
+                "1": {
+                    "name": "punctuation.separator.pipe.guml"
+                }
+            },
+            "patterns": [
+                {
+                    "match": "[a-z_][a-zA-Z0-9_]*",
+                    "name": "variable.other.guml"
+                },
+                {
+                    "match": ",",
+                    "name": "punctuation.separator.comma.guml"
+                }
+            ]
+        },
+        "event-subscription": {
+            "begin": "(#[a-z_][a-zA-Z0-9_]*)\\s*(:)",
+            "beginCaptures": {
+                "1": {
+                    "name": "variable.other.event-ref.guml"
+                },
+                "2": {
+                    "name": "punctuation.separator.colon.guml"
+                }
+            },
+            "end": "(?=[,\\}\\n])",
+            "patterns": [
+                {
+                    "include": "#expression"
+                }
+            ]
+        },
+        "mapping-assignment": {
+            "begin": "([a-z_][a-zA-Z0-9_]*)\\s*(:=|=:|<=>)",
+            "beginCaptures": {
+                "1": {
+                    "name": "variable.other.property.guml"
+                },
+                "2": {
+                    "name": "keyword.operator.mapping.guml"
+                }
+            },
+            "end": "(?=[,\\}\\n])",
+            "patterns": [
+                {
+                    "include": "#expression"
+                }
+            ]
+        },
+        "template-param-assignment": {
+            "begin": "([a-z_][a-zA-Z0-9_]*)\\s*(=>)",
+            "beginCaptures": {
+                "1": {
+                    "name": "variable.parameter.guml"
+                },
+                "2": {
+                    "name": "keyword.operator.fat-arrow.guml"
+                }
+            },
+            "end": "(?=\\})",
+            "patterns": [
+                {
+                    "include": "#component-declaration"
+                }
+            ]
+        },
+        "property-assignment": {
+            "begin": "([a-z_][a-zA-Z0-9_]*)\\s*(:)(?!=)",
+            "beginCaptures": {
+                "1": {
+                    "name": "variable.other.property.guml"
+                },
+                "2": {
+                    "name": "punctuation.separator.colon.guml"
+                }
+            },
+            "end": "(?=[,\\}\\n])",
+            "patterns": [
+                {
+                    "include": "#expression"
+                }
+            ]
+        },
+        "expression": {
+            "patterns": [
+                {
+                    "include": "#comment"
+                },
+                {
+                    "include": "#template-string"
+                },
+                {
+                    "include": "#string"
+                },
+                {
+                    "include": "#number"
+                },
+                {
+                    "include": "#boolean-null"
+                },
+                {
+                    "include": "#resource-function"
+                },
+                {
+                    "include": "#new-expression"
+                },
+                {
+                    "include": "#enum-value"
+                },
+                {
+                    "include": "#global-ref"
+                },
+                {
+                    "include": "#alias-ref"
+                },
+                {
+                    "include": "#operator"
+                },
+                {
+                    "include": "#paren-expression"
+                },
+                {
+                    "include": "#bracket-expression"
+                },
+                {
+                    "include": "#identifier"
+                },
+                {
+                    "include": "#punctuation"
+                }
+            ]
+        },
+        "string": {
+            "name": "string.quoted.double.guml",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.guml",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "template-string": {
+            "begin": "\\$\"",
+            "beginCaptures": {
+                "0": {
+                    "name": "string.interpolated.guml punctuation.definition.string.begin.guml"
+                }
+            },
+            "end": "\"",
+            "endCaptures": {
+                "0": {
+                    "name": "string.interpolated.guml punctuation.definition.string.end.guml"
+                }
+            },
+            "patterns": [
+                {
+                    "name": "string.interpolated.guml constant.character.escape.guml",
+                    "match": "\\\\."
+                },
+                {
+                    "comment": "Escaped braces {{ and }}",
+                    "name": "string.interpolated.guml constant.character.escape.guml",
+                    "match": "\\{\\{|\\}\\}"
+                },
+                {
+                    "begin": "\\{",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "punctuation.definition.template-expression.begin.guml"
+                        }
+                    },
+                    "end": "\\}",
+                    "endCaptures": {
+                        "0": {
+                            "name": "punctuation.definition.template-expression.end.guml"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#expression"
+                        }
+                    ]
+                },
+                {
+                    "comment": "Literal text in template string",
+                    "name": "string.interpolated.guml",
+                    "match": "[^\\\\\"{}]+"
+                }
+            ]
+        },
+        "number": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.float.guml",
+                    "match": "\\b\\d+\\.\\d+([eE][+-]?\\d+)?\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.guml",
+                    "match": "\\b\\d+\\b"
+                }
+            ]
+        },
+        "boolean-null": {
+            "match": "\\b(true|false|null)\\b",
+            "name": "constant.language.guml"
+        },
+        "resource-function": {
+            "match": "\\b(image|font|audio|video)\\s*(?=\\()",
+            "captures": {
+                "1": {
+                    "name": "support.function.resource.guml"
+                }
+            }
+        },
+        "new-expression": {
+            "match": "\\b(new)\\s+([A-Z][a-zA-Z0-9_]*)",
+            "captures": {
+                "1": {
+                    "name": "keyword.operator.new.guml"
+                },
+                "2": {
+                    "name": "entity.name.type.class.guml"
+                }
+            }
+        },
+        "enum-value": {
+            "match": "(?<![a-zA-Z0-9_])\\.[A-Z][a-zA-Z0-9_]*",
+            "name": "variable.other.enummember.guml"
+        },
+        "global-ref": {
+            "match": "\\$[a-zA-Z_][a-zA-Z0-9_]*",
+            "name": "variable.other.global-ref.guml"
+        },
+        "alias-ref": {
+            "match": "@[a-zA-Z_][a-zA-Z0-9_]*",
+            "name": "variable.other.alias-ref.guml"
+        },
+        "operator": {
+            "patterns": [
+                {
+                    "match": "<=>|:=|=:|=>",
+                    "name": "keyword.operator.mapping.guml"
+                },
+                {
+                    "match": "==|!=|<=|>=|<|>",
+                    "name": "keyword.operator.comparison.guml"
+                },
+                {
+                    "match": "&&|\\|\\||!",
+                    "name": "keyword.operator.logical.guml"
+                },
+                {
+                    "match": "\\+|-|\\*|/|%",
+                    "name": "keyword.operator.arithmetic.guml"
+                },
+                {
+                    "match": "\\?",
+                    "name": "keyword.operator.ternary.guml"
+                },
+                {
+                    "match": ":",
+                    "name": "keyword.operator.ternary.guml"
+                }
+            ]
+        },
+        "identifier": {
+            "match": "\\b[a-z_][a-zA-Z0-9_]*\\b",
+            "name": "variable.other.guml"
+        },
+        "paren-expression": {
+            "begin": "\\(",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.bracket.round.begin.guml"
+                }
+            },
+            "end": "\\)",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.bracket.round.end.guml"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expression"
+                },
+                {
+                    "match": ",",
+                    "name": "punctuation.separator.comma.guml"
+                }
+            ]
+        },
+        "bracket-expression": {
+            "begin": "\\[",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.bracket.square.begin.guml"
+                }
+            },
+            "end": "\\]",
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.bracket.square.end.guml"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#expression"
+                },
+                {
+                    "match": ",",
+                    "name": "punctuation.separator.comma.guml"
+                }
+            ]
+        },
+        "punctuation": {
+            "patterns": [
+                {
+                    "match": "\\{",
+                    "name": "punctuation.definition.block.begin.guml"
+                },
+                {
+                    "match": "\\}",
+                    "name": "punctuation.definition.block.end.guml"
+                },
+                {
+                    "match": ",",
+                    "name": "punctuation.separator.comma.guml"
+                },
+                {
+                    "match": "\\.",
+                    "name": "punctuation.accessor.dot.guml"
+                },
+                {
+                    "match": ":",
+                    "name": "punctuation.separator.colon.guml"
+                }
+            ]
+        }
+    }
+}

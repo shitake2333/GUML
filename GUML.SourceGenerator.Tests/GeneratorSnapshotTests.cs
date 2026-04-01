@@ -1,6 +1,9 @@
 ﻿﻿using System.Collections.Immutable;
+using GUML.Shared.Syntax;
+using GUML.Shared.Syntax.Nodes;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Text;
 
 namespace GUML.SourceGenerator.Tests;
@@ -8,11 +11,10 @@ namespace GUML.SourceGenerator.Tests;
 [TestClass]
 public class GumlCodeEmitterTests
 {
-    private static GumlDoc ParseGuml(string code)
+    private static GumlDocumentSyntax ParseGuml(string code)
     {
-        var parser = new GumlParser();
-        parser.WithConverter(new KeyConverter());
-        return parser.Parse(code);
+        var result = GumlSyntaxTree.Parse(code);
+        return result.Root;
     }
 
     [TestMethod]
@@ -68,7 +70,7 @@ public class GumlCodeEmitterTests
         var doc = ParseGuml(guml);
         string code = GumlCodeEmitter.Emit("single_each.guml", doc);
 
-        Assert.Contains("new EachScope(null,", code,
+        Assert.Contains("new EachScope(null)", code,
             "Top-level each should use null as parent scope.");
         Assert.Contains("createItem_0", code);
         Assert.Contains("Reconcile", code);
@@ -140,7 +142,7 @@ public class GumlCodeEmitterTests
     }
 
     [TestMethod]
-    public void DataBinding_WithoutScanner_GeneratesReflectionFallback()
+    public void DataBinding_WithoutScanner_GeneratesDynamicFallback()
     {
         string guml = @"Panel {
     Label {
@@ -148,13 +150,13 @@ public class GumlCodeEmitterTests
     }
 }";
         var doc = ParseGuml(guml);
-        // Pass scanner = null explicitly — should fall back to string property name (reflection path)
+        // Pass scanner = null explicitly — should fall back to dynamic dispatch
         string code = GumlCodeEmitter.Emit("binding_test.guml", doc);
 
-        Assert.Contains("\"Text\"", code,
-            "Expected string property name 'Text' for reflection fallback.");
-        Assert.DoesNotContain("(val) =>", code,
-            "Should NOT contain setter lambda when scanner is null.");
+        Assert.Contains("(dynamic)", code,
+            "Expected dynamic cast fallback when scanner is null.");
+        Assert.Contains("(val) =>", code,
+            "Should contain setter lambda with dynamic dispatch.");
     }
 
     [TestMethod]
@@ -177,8 +179,8 @@ public class GumlCodeEmitterTests
 
         Assert.Contains("(val) =>", code,
             "Expected setter lambda for zero-reflection binding.");
-        Assert.Contains("(string)val", code,
-            "Expected (string)val cast for Label.Text property.");
+        Assert.Contains("Convert.ToString(val)", code,
+            "Expected Convert.ToString(val) cast for Label.Text property.");
         Assert.DoesNotContain("\"Text\"", code,
             "Should NOT contain string property name when scanner resolves the type.");
     }
@@ -310,7 +312,7 @@ public class GumlCodeEmitterTests
     {
         string guml = "Panel { }";
         var doc = ParseGuml(guml);
-        string[] namespaces = new[] { "MyGame.GUI", "MyGame.Widgets" };
+        string[] namespaces = ["MyGame.GUI", "MyGame.Widgets"];
 
         string code = GumlCodeEmitter.Emit("test.guml", doc, namespaces);
 
@@ -445,7 +447,7 @@ public class GumlCodeEmitterTests
 
         Assert.Contains("[System.Runtime.CompilerServices.ModuleInitializer]", code);
         Assert.Contains("internal static void Register()", code);
-        Assert.Contains("Guml.ViewRegistry[\"gui/test.guml\"]", code);
+        Assert.Contains("Guml.ControllerRegistry[typeof(TestController)]", code);
     }
 
     [TestMethod]
@@ -514,8 +516,8 @@ public class GumlCodeEmitterTests
 
         Assert.IsNotNull(code, "Expected non-null output for doc with aliases.");
         Assert.Contains("public partial class TestController", code);
-        Assert.Contains("public Label Hello { get; internal set; }", code);
-        Assert.Contains("public Button MyBtn { get; internal set; }", code);
+        Assert.Contains("public Label Hello { get; internal set; } = null!;", code);
+        Assert.Contains("public Button MyBtn { get; internal set; } = null!;", code);
     }
 
     [TestMethod]
@@ -597,8 +599,9 @@ namespace Godot
 ";
         var syntaxTree = CSharpSyntaxTree.ParseText(godotStubs);
         return CSharpCompilation.Create("GodotStubs",
-            new[] { syntaxTree },
-            new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
+            [syntaxTree],
+            [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)],
+
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
     }
 }
@@ -651,9 +654,8 @@ namespace GUML
 
     public static class Guml
     {
-        public static readonly System.Collections.Generic.Dictionary<string, Func<Godot.Node, GuiController>> ViewRegistry = new();
+        public static readonly System.Collections.Generic.Dictionary<System.Type, Func<Godot.Node, GuiController>> ControllerRegistry = new();
         public static object ResourceProvider;
-        public static readonly System.Collections.Generic.Dictionary<string, object> GlobalRefs = new();
     }
 }
 ";
@@ -688,13 +690,12 @@ namespace Godot
         var userTree = CSharpSyntaxTree.ParseText(userSource, path: userSourceFilePath);
 
         return CSharpCompilation.Create("TestCompilation",
-            new[] { attrTree, godotTree, userTree },
-            new[]
-            {
+            [attrTree, godotTree, userTree],
+            [
                 MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
                 MetadataReference.CreateFromFile(typeof(System.ComponentModel.INotifyPropertyChanged).Assembly
                     .Location),
-            },
+            ],
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
     }
 
@@ -753,7 +754,7 @@ public partial class TestController : GuiController { }
     [TestMethod]
     public void Generator_WithAttribute_GeneratesRegisterMethod()
     {
-        string gumlContent = @"Panel { }";
+        string gumlContent = "Panel { }";
         string controllerSource = @"
 using GUML;
 using GUML.Shared;
@@ -778,7 +779,7 @@ public partial class TestController : GuiController { }
         Assert.IsNotNull(viewSource, "Expected TestGumlView to be generated.");
         Assert.Contains("[System.Runtime.CompilerServices.ModuleInitializer]", viewSource);
         Assert.Contains("internal static void Register()", viewSource);
-        Assert.Contains("Guml.ViewRegistry[", viewSource);
+        Assert.Contains("Guml.ControllerRegistry[typeof(TestController)]", viewSource);
         Assert.Contains("new TestController()", viewSource);
         Assert.Contains("new TestGumlView()", viewSource);
     }
@@ -873,7 +874,7 @@ public partial class MissingController : GuiController { }
         var generator = new GumlSourceGenerator();
         GeneratorDriver driver = CSharpGeneratorDriver.Create(generator);
 
-        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out var diagnostics);
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out var diagnostics);
 
         // Should report GUML005 error
         bool hasGuml005 = false;
@@ -882,7 +883,7 @@ public partial class MissingController : GuiController { }
             if (diag.Id == "GUML005")
             {
                 hasGuml005 = true;
-                Assert.AreEqual(DiagnosticSeverity.Error, diag.Severity);
+                Assert.AreEqual(Microsoft.CodeAnalysis.DiagnosticSeverity.Error, diag.Severity);
                 break;
             }
         }
@@ -925,7 +926,7 @@ public class NonPartialController : GuiController { }
             if (diag.Id == "GUML007")
             {
                 hasGuml007 = true;
-                Assert.AreEqual(DiagnosticSeverity.Warning, diag.Severity);
+                Assert.AreEqual(Microsoft.CodeAnalysis.DiagnosticSeverity.Warning, diag.Severity);
                 break;
             }
         }
@@ -964,160 +965,83 @@ public class NonPartialController : GuiController { }
     }
 
     [TestMethod]
-    public void NormalizeRegistryKey_NormalizesPathSeparators()
+    public void ResolveGumlPath_ResPath_ResolvesRelativeToProjectDir()
     {
-        string result = GumlSourceGenerator.NormalizeRegistryKey(@"C:\project\gui\subdir\test.guml", @"C:\project");
-        Assert.AreEqual("gui/subdir/test.guml", result);
+        string projectDir = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project"));
+        string result = GumlSourceGenerator.ResolveGumlPath("res://gui/test.guml", "", projectDir)!;
+        string expected = Path.GetFullPath(Path.Combine(projectDir, "gui", "test.guml"));
+        Assert.AreEqual(expected, result);
     }
 
     [TestMethod]
-    public void NormalizeRegistryKey_LowercasesPath()
+    public void ResolveGumlPath_RelativePath_ResolvesRelativeToSourceFile()
     {
-        string result = GumlSourceGenerator.NormalizeRegistryKey("C:/Project/GUI/Test.guml", "C:/Project");
-        Assert.AreEqual("gui/test.guml", result);
+        string sourceDir = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project", "scripts", "ctrl"));
+        string result = GumlSourceGenerator.ResolveGumlPath("../../gui/test.guml", sourceDir, "")!;
+        string expected = Path.GetFullPath(Path.Combine(sourceDir, "../../gui/test.guml"));
+        Assert.AreEqual(expected, result);
     }
 
     [TestMethod]
-    public void NormalizeRegistryKey_FallsBackWhenNoProjectDir()
+    public void ResolveGumlPath_ProjectRootRelative_ResolvesRelativeToProjectDir()
     {
-        string result = GumlSourceGenerator.NormalizeRegistryKey(@"D:\full\path\test.guml", "");
-        Assert.AreEqual("d:/full/path/test.guml", result);
+        string projectDir = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project"));
+        string result = GumlSourceGenerator.ResolveGumlPath("gui/test.guml", "", projectDir)!;
+        string expected = Path.GetFullPath(Path.Combine(projectDir, "gui", "test.guml"));
+        Assert.AreEqual(expected, result);
     }
-}
 
-[TestClass]
-public class CompilationApiScannerTests
-{
-    /// <summary>
-    /// Creates a CSharpCompilation with synthetic Godot types for scanner testing.
-    /// </summary>
-    private static CSharpCompilation CreateGodotCompilation(string? extraSource = null)
+    [TestMethod]
+    public void ResolveGumlPath_AbsolutePath_ReturnsAsIs()
     {
-        string godotStubs = @"
-namespace Godot
-{
-    public class GodotObject { }
-    public class Node : GodotObject { }
-    public class CanvasItem : Node { }
-    public class Control : CanvasItem
-    {
-        public bool Visible { get; set; }
+        string absPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project", "gui", "test.guml"));
+        string result = GumlSourceGenerator.ResolveGumlPath(absPath, "", "")!;
+        Assert.AreEqual(absPath, result);
     }
-    public class Label : Control
+
+    [TestMethod]
+    public void ResolveGumlPath_ResPath_WithoutProjectDir_ReturnsNull()
     {
-        public string Text { get; set; }
-        public bool ClipText { get; set; }
+        string? result = GumlSourceGenerator.ResolveGumlPath("res://gui/test.guml", "", "");
+        Assert.IsNull(result);
     }
-    public class Button : Control
+
+    [TestMethod]
+    public void Generator_WithResPath_MatchesAdditionalFile()
     {
-        public string Text { get; set; }
-    }
-    public class Panel : Control { }
-}
+        string gumlContent = @"Panel {
+    size: vec2(640, 480)
+}";
+        string projectDir = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project"));
+        string controllerSource = @"
+using GUML;
+using GUML.Shared;
+[GumlController(""res://gui/test.guml"")]
+public partial class TestController : GuiController { }
 ";
-        var trees = new List<SyntaxTree> { CSharpSyntaxTree.ParseText(godotStubs) };
-        if (extraSource != null)
-        {
-            trees.Add(CSharpSyntaxTree.ParseText(extraSource));
-        }
+        string controllerPath = Path.GetFullPath(Path.Combine(projectDir, "scripts", "controllers",
+            "TestController.cs"));
+        string gumlAbsolutePath = Path.GetFullPath(Path.Combine(projectDir, "gui", "test.guml"));
 
-        return CSharpCompilation.Create("GodotStubs",
-            trees,
-            new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-    }
+        var compilation = CreateControllerCompilation(controllerSource, controllerPath);
+        var additionalText = new InMemoryAdditionalText(gumlAbsolutePath, gumlContent);
 
-    [TestMethod]
-    public void IsAvailable_ReturnsTrueWhenGodotControlExists()
-    {
-        var compilation = CreateGodotCompilation();
-        var scanner = new CompilationApiScanner(compilation);
-        Assert.IsTrue(scanner.IsAvailable);
-    }
+        var generator = new GumlSourceGenerator();
+        var optionsProvider = new TestAnalyzerConfigOptionsProvider(
+            new Dictionary<string, string> { { "build_property.GumlProjectDir", projectDir } });
 
-    [TestMethod]
-    public void IsAvailable_ReturnsFalseWhenNoGodotReference()
-    {
-        var compilation = CSharpCompilation.Create("Empty",
-            references: new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) });
-        var scanner = new CompilationApiScanner(compilation);
-        Assert.IsFalse(scanner.IsAvailable);
-    }
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+                generators: [generator.AsSourceGenerator()],
+                additionalTexts: [additionalText],
+                optionsProvider: optionsProvider)
+            ;
 
-    [TestMethod]
-    public void ResolvePropertyType_ReturnsStringForLabelText()
-    {
-        var compilation = CreateGodotCompilation();
-        var scanner = new CompilationApiScanner(compilation);
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        var results = driver.GetRunResult();
 
-        var typeSymbol = scanner.ResolvePropertyType("Label", "Text");
-        Assert.IsNotNull(typeSymbol);
-        Assert.AreEqual(SpecialType.System_String, typeSymbol.SpecialType);
-    }
-
-    [TestMethod]
-    public void ResolvePropertyType_ReturnsBoolForLabelClipText()
-    {
-        var compilation = CreateGodotCompilation();
-        var scanner = new CompilationApiScanner(compilation);
-
-        var typeSymbol = scanner.ResolvePropertyType("Label", "ClipText");
-        Assert.IsNotNull(typeSymbol);
-        Assert.AreEqual(SpecialType.System_Boolean, typeSymbol.SpecialType);
-    }
-
-    [TestMethod]
-    public void ResolvePropertyType_ReturnsInheritedProperty()
-    {
-        var compilation = CreateGodotCompilation();
-        var scanner = new CompilationApiScanner(compilation);
-
-        // Label inherits Visible from Control
-        var typeSymbol = scanner.ResolvePropertyType("Label", "Visible");
-        Assert.IsNotNull(typeSymbol);
-        Assert.AreEqual(SpecialType.System_Boolean, typeSymbol.SpecialType);
-    }
-
-    [TestMethod]
-    public void ResolvePropertyType_ReturnsNullForUnknownProperty()
-    {
-        var compilation = CreateGodotCompilation();
-        var scanner = new CompilationApiScanner(compilation);
-
-        var typeSymbol = scanner.ResolvePropertyType("Label", "NonExistent");
-        Assert.IsNull(typeSymbol);
-    }
-
-    [TestMethod]
-    public void ResolvePropertyType_ReturnsNullForUnknownComponent()
-    {
-        var compilation = CreateGodotCompilation();
-        var scanner = new CompilationApiScanner(compilation);
-
-        var typeSymbol = scanner.ResolvePropertyType("UnknownWidget", "Text");
-        Assert.IsNull(typeSymbol);
-    }
-
-    [TestMethod]
-    public void GetCastExpression_MapsStringType()
-    {
-        var compilation = CreateGodotCompilation();
-        var scanner = new CompilationApiScanner(compilation);
-        var typeSymbol = scanner.ResolvePropertyType("Label", "Text")!;
-
-        string? cast = CompilationApiScanner.GetCastExpression(typeSymbol);
-        Assert.AreEqual("(string)", cast);
-    }
-
-    [TestMethod]
-    public void GetCastExpression_MapsBoolType()
-    {
-        var compilation = CreateGodotCompilation();
-        var scanner = new CompilationApiScanner(compilation);
-        var typeSymbol = scanner.ResolvePropertyType("Label", "ClipText")!;
-
-        string? cast = CompilationApiScanner.GetCastExpression(typeSymbol);
-        Assert.AreEqual("(bool)", cast);
+        string? viewSource = FindGeneratedSource(results, "TestGumlView");
+        Assert.IsNotNull(viewSource, "Expected TestGumlView to be generated with res:// path.");
+        Assert.Contains("public partial class TestGumlView", viewSource);
     }
 }
 
@@ -1131,6 +1055,34 @@ internal sealed class InMemoryAdditionalText(string path, string text) : Additio
     public override SourceText GetText(CancellationToken cancellationToken = default)
     {
         return SourceText.From(text, System.Text.Encoding.UTF8);
+    }
+}
+
+/// <summary>
+/// In-memory implementation of AnalyzerConfigOptionsProvider for testing.
+/// </summary>
+internal sealed class TestAnalyzerConfigOptionsProvider : AnalyzerConfigOptionsProvider
+{
+    private readonly TestGlobalOptions _globalOptions;
+
+    public TestAnalyzerConfigOptionsProvider(Dictionary<string, string> globalOptions)
+    {
+        _globalOptions = new TestGlobalOptions(globalOptions);
+    }
+
+    public override AnalyzerConfigOptions GlobalOptions => _globalOptions;
+
+    public override AnalyzerConfigOptions GetOptions(SyntaxTree tree) => TestGlobalOptions.Empty;
+    public override AnalyzerConfigOptions GetOptions(AdditionalText textFile) => TestGlobalOptions.Empty;
+
+    private sealed class TestGlobalOptions : AnalyzerConfigOptions
+    {
+        public static readonly TestGlobalOptions Empty = new(new Dictionary<string, string>());
+        private readonly Dictionary<string, string> _options;
+
+        public TestGlobalOptions(Dictionary<string, string> options) => _options = options;
+
+        public override bool TryGetValue(string key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? value) => _options.TryGetValue(key, out value);
     }
 }
 
