@@ -1,0 +1,15 @@
+{
+  "solution": {
+    "path": "GUML.sln",
+    "projects": [
+      "GUML.Shared\\GUML.Shared.csproj",
+      "GUML\\GUML.csproj",
+      "GUML.SourceGenerator\\GUML.SourceGenerator.csproj",
+      "GUML.Analyzer\\GUML.Analyzer.csproj",
+      "GUML.Shared.Tests\\GUML.Shared.Tests.csproj",
+      "GUML.Tests\\GUML.Tests.csproj",
+      "GUML.SourceGenerator.Tests\\GUML.SourceGenerator.Tests.csproj",
+      "GUML.Analyzer.Tests\\GUML.Analyzer.Tests.csproj"
+    ]
+  }
+}
