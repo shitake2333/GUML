@@ -1,4 +1,6 @@
-# GUML.Analyzer
+# GUML Analyzer
+
+[![NuGet](https://img.shields.io/nuget/v/GUML.Analyzer)](https://www.nuget.org/packages/GUML.Analyzer)
 
 GUML language analyzer for Godot .NET — provides Roslyn-based project analysis and LSP features via JSON-RPC.
 

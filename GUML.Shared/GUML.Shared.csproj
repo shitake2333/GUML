@@ -7,11 +7,16 @@
     <Nullable>enable</Nullable>
 
     <PackageId>GUML.Shared</PackageId>
-    <Version>0.3.0</Version>
+    <Version>0.3.1</Version>
     <Description>Shared infrastructure for GUML: full-fidelity CST parser, API metadata models, and diagnostics. Used by GUML.SourceGenerator, GUML.LSP, and GUML.ApiGenerator.</Description>
     <PackageProjectUrl>https://github.com/shitake2333/GUML</PackageProjectUrl>
     <PackageTags>Godot GUML Shared</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="GUML.Shared.Tests" />
