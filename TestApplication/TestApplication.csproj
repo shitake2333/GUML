@@ -8,7 +8,7 @@
   <ItemGroup>
     <PackageReference Include="Markdig" Version="1.1.2" />
     <PackageReference Include="TextMateSharp.Grammars" Version="2.0.3" />
-    <PackageReference Include="GUML" Version="0.3.0" />
-    <PackageReference Include="GUML.SourceGenerator" Version="0.3.0" />
+    <PackageReference Include="GUML" Version="0.3.1" />
+    <PackageReference Include="GUML.SourceGenerator" Version="0.3.1" />
   </ItemGroup>
 </Project>
