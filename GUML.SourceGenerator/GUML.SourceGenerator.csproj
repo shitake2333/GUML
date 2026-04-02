@@ -34,9 +34,14 @@
   </ItemGroup>
 
   <!-- Resolve GUML.Shared from ProjectReference output and pack it alongside the generator -->
-  <Target Name="_AddSharedToAnalyzers" BeforeTargets="_GetPackageFiles" DependsOnTargets="ResolveProjectReferences">
+  <Target Name="_AddSharedToAnalyzers" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\GUML.Shared\GUML.Shared.csproj"
+             Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration);NoBuild=false">
+      <Output TaskParameter="TargetOutputs" ItemName="_SharedAssemblyPath" />
+    </MSBuild>
     <ItemGroup>
-      <None Include="@(_ResolvedProjectReferencePaths)" Condition="'%(Filename)' == 'GUML.Shared'"
+      <None Include="@(_SharedAssemblyPath)"
             Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     </ItemGroup>
   </Target>
