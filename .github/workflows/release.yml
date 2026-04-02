@@ -37,7 +37,6 @@ jobs:
           dotnet pack GUML/GUML.csproj -c Release -o artifacts --no-build
           dotnet pack GUML.SourceGenerator/GUML.SourceGenerator.csproj -c Release -o artifacts --no-build
           dotnet pack GUML.Analyzer/GUML.Analyzer.csproj -c Release -o artifacts --no-build
-          dotnet pack RegexTokenizeGenerator/RegexTokenizeGenerator.csproj -c Release -o artifacts --no-build
 
       - name: Push to NuGet.org
         run: |
