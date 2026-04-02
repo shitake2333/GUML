@@ -18,12 +18,12 @@ GUML is a declarative UI markup language (`.guml`) for **Godot .NET**, providing
 ## Install
 
 ```sh
-dotnet add package GUML --version 0.3.0
+dotnet add package GUML
 ```
 
 For source generator support:
 ```sh
-dotnet add package GUML.SourceGenerator --version 0.3.0
+dotnet add package GUML.SourceGenerator
 ```
 
 ## Documentation
