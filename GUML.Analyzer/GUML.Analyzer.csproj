@@ -9,7 +9,7 @@
         <!-- NuGet global tool packaging -->
         <PackAsTool>true</PackAsTool>
         <ToolCommandName>guml-analyzer</ToolCommandName>
-        <version>0.3.1</version>
+        <version>0.3.2</version>
         <PackageId>GUML.Analyzer</PackageId>
         <Description>GUML language analyzer for Godot .NET — provides Roslyn-based project analysis and LSP features via JSON-RPC</Description>
         <PackageProjectUrl>https://github.com/shitake2333/GUML</PackageProjectUrl>

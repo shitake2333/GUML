@@ -12,7 +12,7 @@ public sealed class JsonRpcRequest
 {
     [JsonPropertyName("jsonrpc")] public string JsonRpc { get; set; } = "2.0";
 
-    [JsonPropertyName("id")] public int? Id { get; set; }
+    [JsonPropertyName("id")] public JsonElement? Id { get; set; }
 
     [JsonPropertyName("method")] public string Method { get; set; } = "";
 
@@ -26,7 +26,7 @@ public sealed class JsonRpcResponse
 {
     [JsonPropertyName("jsonrpc")] public string JsonRpc { get; set; } = "2.0";
 
-    [JsonPropertyName("id")] public int? Id { get; set; }
+    [JsonPropertyName("id")] public JsonElement? Id { get; set; }
 
     [JsonPropertyName("result")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -134,7 +134,7 @@ public sealed class JsonRpcTransport : IDisposable
     /// When result is null, a JSON null is still written so the response
     /// remains valid per the JSON-RPC 2.0 spec.
     /// </summary>
-    public void SendResponse(int id, object? result)
+    public void SendResponse(JsonElement? id, object? result)
     {
         // Wrap null in a JsonElement so WhenWritingNull does not omit "result".
         var response = new JsonRpcResponse { Id = id, Result = result ?? s_jsonNull };
@@ -144,7 +144,7 @@ public sealed class JsonRpcTransport : IDisposable
     /// <summary>
     /// Sends a JSON-RPC error response to the output stream.
     /// </summary>
-    public void SendError(int id, int code, string message)
+    public void SendError(JsonElement? id, int code, string message)
     {
         var response = new JsonRpcResponse { Id = id, Error = new JsonRpcError { Code = code, Message = message } };
         WriteMessage(response);

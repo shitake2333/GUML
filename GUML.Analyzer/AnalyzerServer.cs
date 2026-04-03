@@ -67,8 +67,8 @@ public sealed class AnalyzerServer : IDisposable
             catch (Exception ex)
             {
                 Log.Logger.Error(ex, "Error dispatching request: {Method}", request.Method);
-                if (request.Id.HasValue)
-                    _transport.SendError(request.Id.Value, -32603, $"Internal error: {ex.Message}");
+                if (request.Id != null)
+                    _transport.SendError(request.Id, -32603, $"Internal error: {ex.Message}");
             }
         }
 
@@ -120,6 +120,7 @@ public sealed class AnalyzerServer : IDisposable
                 break;
             case "initialized":
             case "exit":
+            case "$/cancelRequest":
                 break;
 
             // LSP document synchronization
@@ -167,8 +168,8 @@ public sealed class AnalyzerServer : IDisposable
 
             default:
                 Log.Logger.Warning("Unknown method: {Method}", request.Method);
-                if (request.Id.HasValue)
-                    _transport.SendError(request.Id.Value, -32601, $"Method not found: {request.Method}");
+                if (request.Id != null)
+                    _transport.SendError(request.Id, -32601, $"Method not found: {request.Method}");
                 break;
         }
     }
@@ -256,13 +257,13 @@ public sealed class AnalyzerServer : IDisposable
         if (!string.IsNullOrEmpty(workspaceRoot) && Directory.Exists(workspaceRoot))
             StartGumlFileWatcher(workspaceRoot);
 
-        if (request.Id.HasValue)
+        if (request.Id != null)
         {
             // IMPORTANT: Send InitializeResult BEFORE any notifications
             // (LSP spec: server must not send notifications before the init response)
             // Return standard LSP InitializeResult so vscode-languageclient
             // correctly registers capabilities for completion, hover, etc.
-            _transport.SendResponse(request.Id.Value,
+            _transport.SendResponse(request.Id,
                 new
                 {
                     capabilities = new
@@ -308,8 +309,8 @@ public sealed class AnalyzerServer : IDisposable
 
     private void HandleGetApiCache(JsonRpcRequest request)
     {
-        if (request.Id.HasValue)
-            _transport.SendResponse(request.Id.Value, _analyzer.ApiDocument);
+        if (request.Id != null)
+            _transport.SendResponse(request.Id, _analyzer.ApiDocument);
     }
 
     private void HandleGetClassInfo(JsonRpcRequest request)
@@ -319,16 +320,16 @@ public sealed class AnalyzerServer : IDisposable
             request.Params.Value.TryGetProperty("className", out var cn))
             className = cn.GetString();
 
-        if (request.Id.HasValue)
+        if (request.Id != null)
         {
             if (className != null)
             {
                 var info = _analyzer.GetTypeInfo(className);
-                _transport.SendResponse(request.Id.Value, info);
+                _transport.SendResponse(request.Id, info);
             }
             else
             {
-                _transport.SendError(request.Id.Value, -32602, "Missing required parameter: className");
+                _transport.SendError(request.Id, -32602, "Missing required parameter: className");
             }
         }
     }
@@ -340,16 +341,16 @@ public sealed class AnalyzerServer : IDisposable
             request.Params.Value.TryGetProperty("gumlPath", out var gp))
             gumlPath = gp.GetString();
 
-        if (request.Id.HasValue)
+        if (request.Id != null)
         {
             if (gumlPath != null)
             {
                 var info = _analyzer.GetControllerForGuml(gumlPath);
-                _transport.SendResponse(request.Id.Value, info);
+                _transport.SendResponse(request.Id, info);
             }
             else
             {
-                _transport.SendError(request.Id.Value, -32602, "Missing required parameter: gumlPath");
+                _transport.SendError(request.Id, -32602, "Missing required parameter: gumlPath");
             }
         }
     }
@@ -363,15 +364,15 @@ public sealed class AnalyzerServer : IDisposable
 
         _pendingProjectSelection?.TrySetResult(projectPath);
 
-        if (request.Id.HasValue)
-            _transport.SendResponse(request.Id.Value, new { status = "ok" });
+        if (request.Id != null)
+            _transport.SendResponse(request.Id, new { status = "ok" });
     }
 
     private void HandleShutdown(JsonRpcRequest request)
     {
         Log.Logger.Information("Shutdown requested via JSON-RPC");
-        if (request.Id.HasValue)
-            _transport.SendResponse(request.Id.Value, null);
+        if (request.Id != null)
+            _transport.SendResponse(request.Id, null);
         _shutdownCts.Cancel();
     }
 
@@ -380,8 +381,8 @@ public sealed class AnalyzerServer : IDisposable
         Log.Logger.Information("Manual cache rebuild requested");
 
         // Immediately acknowledge the request
-        if (request.Id.HasValue)
-            _transport.SendResponse(request.Id.Value, new { status = "accepted" });
+        if (request.Id != null)
+            _transport.SendResponse(request.Id, new { status = "accepted" });
 
         _ = Task.Run(async () =>
         {
@@ -432,8 +433,8 @@ public sealed class AnalyzerServer : IDisposable
 
         if (godotVersion == null)
         {
-            if (request.Id.HasValue)
-                _transport.SendError(request.Id.Value, -32602,
+            if (request.Id != null)
+                _transport.SendError(request.Id, -32602,
                     "Cannot determine Godot version. Provide godotVersion parameter or ensure a Godot .csproj is loaded.");
             return;
         }
@@ -468,8 +469,8 @@ public sealed class AnalyzerServer : IDisposable
             {
                 _analyzer.ReloadGodotCatalog(resultPath);
 
-                if (request.Id.HasValue)
-                    _transport.SendResponse(request.Id.Value, new
+                if (request.Id != null)
+                    _transport.SendResponse(request.Id, new
                     {
                         success = true,
                         outputPath = resultPath,
@@ -479,8 +480,8 @@ public sealed class AnalyzerServer : IDisposable
             }
             else
             {
-                if (request.Id.HasValue)
-                    _transport.SendResponse(request.Id.Value, new
+                if (request.Id != null)
+                    _transport.SendResponse(request.Id, new
                     {
                         success = false,
                         message = "API generation failed. Check server logs for details.",
@@ -490,8 +491,8 @@ public sealed class AnalyzerServer : IDisposable
         catch (Exception ex)
         {
             Log.Logger.Error(ex, "Failed to generate Godot API");
-            if (request.Id.HasValue)
-                _transport.SendError(request.Id.Value, -32603, $"API generation failed: {ex.Message}");
+            if (request.Id != null)
+                _transport.SendError(request.Id, -32603, $"API generation failed: {ex.Message}");
         }
     }
 
@@ -577,32 +578,36 @@ public sealed class AnalyzerServer : IDisposable
 
     private void HandleCompletion(JsonRpcRequest request)
     {
-        if (!request.Id.HasValue) return;
+        if (request.Id == null) return;
+
+        Log.Logger.Information("Completion raw params: {Params}",
+            request.Params.HasValue ? request.Params.Value.GetRawText() : "(null)");
 
         var (doc, position) = ExtractDocumentPosition(request);
         if (doc == null)
         {
-            Log.Logger.Debug("Completion: document not found");
-            _transport.SendResponse(request.Id.Value, Array.Empty<CompletionItem>());
+            Log.Logger.Warning("Completion: document not found. Open docs: {Docs}",
+                string.Join(", ", (_workspace?.GetAllDocuments() ?? []).Select(d => d.Uri)));
+            _transport.SendResponse(request.Id, Array.Empty<CompletionItem>());
             return;
         }
 
         var model = _workspace!.GetSemanticModel(doc.Uri);
         var items = CompletionHandler.GetCompletions(doc, model, position, _analyzer);
-        Log.Logger.Debug("Completion at {Uri} ({Line}:{Char}): {Count} items",
+        Log.Logger.Information("Completion at {Uri} ({Line}:{Char}): {Count} items",
             doc.Uri, position.Line, position.Character, items.Count);
-        _transport.SendResponse(request.Id.Value, items);
+        _transport.SendResponse(request.Id, items);
     }
 
     private void HandleHover(JsonRpcRequest request)
     {
-        if (!request.Id.HasValue) return;
+        if (request.Id == null) return;
 
         var (doc, position) = ExtractDocumentPosition(request);
         if (doc == null)
         {
             Log.Logger.Debug("Hover: document not found");
-            _transport.SendResponse(request.Id.Value, null);
+            _transport.SendResponse(request.Id, null);
             return;
         }
 
@@ -610,18 +615,18 @@ public sealed class AnalyzerServer : IDisposable
         var hover = HoverHandler.GetHover(doc, model, position, _analyzer);
         Log.Logger.Debug("Hover at {Uri} ({Line}:{Char}): {HasResult}",
             doc.Uri, position.Line, position.Character, hover != null);
-        _transport.SendResponse(request.Id.Value, hover);
+        _transport.SendResponse(request.Id, hover);
     }
 
     private void HandleDefinition(JsonRpcRequest request)
     {
-        if (!request.Id.HasValue) return;
+        if (request.Id == null) return;
 
         var (doc, position) = ExtractDocumentPosition(request);
         if (doc == null)
         {
             Log.Logger.Debug("Definition: document not found");
-            _transport.SendResponse(request.Id.Value, Array.Empty<LspLocation>());
+            _transport.SendResponse(request.Id, Array.Empty<LspLocation>());
             return;
         }
 
@@ -629,96 +634,96 @@ public sealed class AnalyzerServer : IDisposable
         var locations = DefinitionHandler.GetDefinitions(doc, model, position, _analyzer);
         Log.Logger.Debug("Definition at {Uri} ({Line}:{Char}): {Count} locations",
             doc.Uri, position.Line, position.Character, locations.Count);
-        _transport.SendResponse(request.Id.Value, locations);
+        _transport.SendResponse(request.Id, locations);
     }
 
     private void HandleFormatting(JsonRpcRequest request)
     {
-        if (!request.Id.HasValue) return;
+        if (request.Id == null) return;
 
         var doc = ExtractDocument(request);
         if (doc == null)
         {
-            _transport.SendResponse(request.Id.Value, Array.Empty<TextEdit>());
+            _transport.SendResponse(request.Id, Array.Empty<TextEdit>());
             return;
         }
 
         var options = ExtractFormattingOptions(request);
         var edits = FormattingHandler.Format(doc, options);
-        _transport.SendResponse(request.Id.Value, edits);
+        _transport.SendResponse(request.Id, edits);
     }
 
     private void HandleRangeFormatting(JsonRpcRequest request)
     {
-        if (!request.Id.HasValue) return;
+        if (request.Id == null) return;
 
         var doc = ExtractDocument(request);
         if (doc == null)
         {
-            _transport.SendResponse(request.Id.Value, Array.Empty<TextEdit>());
+            _transport.SendResponse(request.Id, Array.Empty<TextEdit>());
             return;
         }
 
         var options = ExtractFormattingOptions(request);
         LspRange? range = ExtractRange(request);
         var edits = FormattingHandler.Format(doc, options, range);
-        _transport.SendResponse(request.Id.Value, edits);
+        _transport.SendResponse(request.Id, edits);
     }
 
     private void HandleSemanticTokensFull(JsonRpcRequest request)
     {
-        if (!request.Id.HasValue) return;
+        if (request.Id == null) return;
 
         var doc = ExtractDocument(request);
         if (doc == null)
         {
-            _transport.SendResponse(request.Id.Value, new SemanticTokensResult());
+            _transport.SendResponse(request.Id, new SemanticTokensResult());
             return;
         }
 
         var result = SemanticTokensHandler.GetTokens(doc);
-        _transport.SendResponse(request.Id.Value, result);
+        _transport.SendResponse(request.Id, result);
     }
 
     private void HandleSemanticTokensRange(JsonRpcRequest request)
     {
-        if (!request.Id.HasValue) return;
+        if (request.Id == null) return;
 
         var doc = ExtractDocument(request);
         if (doc == null)
         {
-            _transport.SendResponse(request.Id.Value, new SemanticTokensResult());
+            _transport.SendResponse(request.Id, new SemanticTokensResult());
             return;
         }
 
         LspRange? range = ExtractRange(request);
         var result = SemanticTokensHandler.GetTokens(doc, range);
-        _transport.SendResponse(request.Id.Value, result);
+        _transport.SendResponse(request.Id, result);
     }
 
     private void HandleDocumentHighlight(JsonRpcRequest request)
     {
-        if (!request.Id.HasValue) return;
+        if (request.Id == null) return;
 
         var (doc, position) = ExtractDocumentPosition(request);
         if (doc == null)
         {
-            _transport.SendResponse(request.Id.Value, Array.Empty<DocumentHighlight>());
+            _transport.SendResponse(request.Id, Array.Empty<DocumentHighlight>());
             return;
         }
 
         var highlights = DocumentHighlightHandler.GetHighlights(doc, position);
-        _transport.SendResponse(request.Id.Value, highlights);
+        _transport.SendResponse(request.Id, highlights);
     }
 
     private void HandlePrepareRename(JsonRpcRequest request)
     {
-        if (!request.Id.HasValue) return;
+        if (request.Id == null) return;
 
         var (doc, position) = ExtractDocumentPosition(request);
         if (doc == null)
         {
-            _transport.SendResponse(request.Id.Value, null);
+            _transport.SendResponse(request.Id, null);
             return;
         }
 
@@ -726,17 +731,17 @@ public sealed class AnalyzerServer : IDisposable
         var result = RenameHandler.PrepareRename(doc, model, position);
         Log.Logger.Debug("PrepareRename at {Uri} ({Line}:{Char}): {HasResult}",
             doc.Uri, position.Line, position.Character, result != null);
-        _transport.SendResponse(request.Id.Value, result);
+        _transport.SendResponse(request.Id, result);
     }
 
     private void HandleRename(JsonRpcRequest request)
     {
-        if (!request.Id.HasValue) return;
+        if (request.Id == null) return;
 
         var (doc, position) = ExtractDocumentPosition(request);
         if (doc == null)
         {
-            _transport.SendResponse(request.Id.Value, null);
+            _transport.SendResponse(request.Id, null);
             return;
         }
 
@@ -748,7 +753,7 @@ public sealed class AnalyzerServer : IDisposable
         var edits = RenameHandler.GetRenameEdits(doc, model, position, newName, _workspace);
         Log.Logger.Debug("Rename at {Uri} ({Line}:{Char}) -> '{NewName}': {HasEdits}",
             doc.Uri, position.Line, position.Character, newName, edits != null);
-        _transport.SendResponse(request.Id.Value, edits);
+        _transport.SendResponse(request.Id, edits);
     }
 
     // ══════════════════════════════════════════════════════════
